@@ -41,7 +41,10 @@ type DiffResult struct {
 
 // Tracker handles git change detection
 type Tracker struct {
-	lastCommit string
+	gitRoot               string
+	allUncommittedChanges []string
+	allCommitChanges      map[int][]string
+	lastCommit            string
 	logger     *logging.Logger
 	cache      *GitCache
 }

@@ -12,9 +12,79 @@ import (
 // NewTracker creates a new git tracker
 func NewTracker() *Tracker {
 	return &Tracker{
-		logger: nil, // Will be set by caller
-		cache:  NewGitCache(),
+		logger:           nil, // Will be set by caller
+		cache:            NewGitCache(),
+		allCommitChanges: make(map[int][]string),
 	}
+}
+
+// PreloadChanges preloads all uncommitted and commit-based changes for the entire repository
+func (t *Tracker) PreloadChanges(depth int) error {
+	if depth < 2 {
+		depth = 2
+	}
+
+	gitRoot, err := t.getGitRoot()
+	if err != nil {
+		return err
+	}
+
+	// 1. Preload uncommitted changes
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = gitRoot
+	statusOutput, err := statusCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to preload git status: %w", err)
+	}
+
+	var statusFiles []string
+	lines := strings.Split(strings.TrimSpace(string(statusOutput)), "\n")
+	for _, line := range lines {
+		if len(line) >= 4 {
+			statusFiles = append(statusFiles, strings.TrimSpace(line[3:]))
+		}
+	}
+	t.allUncommittedChanges = statusFiles
+
+	// 2. Preload commit changes
+	fromCommit := fmt.Sprintf("HEAD~%d", depth-1)
+	diffCmd := exec.Command("git", "diff", "--name-only", fromCommit, "HEAD")
+	diffCmd.Dir = gitRoot
+	diffOutput, err := diffCmd.Output()
+
+	if err != nil {
+		// Fallback for shallow clones or initial commits
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {
+			if t.logger != nil {
+				t.logger.Warn(logging.CATEGORY_GIT, "Git history insufficient for depth analysis (shallow clone?). Falling back to HEAD diff.")
+			}
+			diffCmd = exec.Command("git", "diff", "--name-only", "HEAD")
+			diffCmd.Dir = gitRoot
+			diffOutput, err = diffCmd.Output()
+			if err != nil {
+				t.allCommitChanges[depth] = []string{}
+				return nil
+			}
+		} else {
+			return fmt.Errorf("failed to preload git diff: %w", err)
+		}
+	}
+
+	var diffFiles []string
+	diffLines := strings.Split(strings.TrimSpace(string(diffOutput)), "\n")
+	for _, line := range diffLines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			diffFiles = append(diffFiles, line)
+		}
+	}
+	t.allCommitChanges[depth] = diffFiles
+
+	if t.logger != nil {
+		t.logger.Debug(logging.CATEGORY_GIT, fmt.Sprintf("Preloaded %d uncommitted and %d commit changes (depth: %d)", len(statusFiles), len(diffFiles), depth))
+	}
+
+	return nil
 }
 
 // SetLogger sets the logger for the tracker
@@ -25,14 +95,18 @@ func (t *Tracker) SetLogger(logger *logging.Logger) {
 	}
 }
 
-// getGitRoot finds the root directory of the git repository
+// getGitRoot finds the root directory of the git repository and caches it
 func (t *Tracker) getGitRoot() (string, error) {
+	if t.gitRoot != "" {
+		return t.gitRoot, nil
+	}
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to find git root: %w", err)
 	}
-	return strings.TrimSpace(string(output)), nil
+	t.gitRoot = strings.TrimSpace(string(output))
+	return t.gitRoot, nil
 }
 
 // GetChangedFiles returns files changed in the service directory from both git status and recent commits
@@ -167,6 +241,18 @@ func (t *Tracker) GetChangedFiles(servicePath string, depth int) ([]string, erro
 
 // getUncommittedChanges gets files changed but not committed (git status)
 func (t *Tracker) getUncommittedChanges(servicePath string) ([]string, error) {
+	// Use preloaded data if available
+	if t.allUncommittedChanges != nil {
+		var changedFiles []string
+		for _, filePath := range t.allUncommittedChanges {
+			// Only include files that are within the service path
+			if strings.HasPrefix(filePath, servicePath+"/") || filePath == servicePath {
+				changedFiles = append(changedFiles, filePath)
+			}
+		}
+		return changedFiles, nil
+	}
+
 	// Get git root to run commands from there
 	gitRoot, err := t.getGitRoot()
 	if err != nil {
@@ -210,6 +296,18 @@ func (t *Tracker) getUncommittedChanges(servicePath string) ([]string, error) {
 func (t *Tracker) getCommitChanges(servicePath string, depth int) ([]string, error) {
 	if depth < 2 {
 		depth = 2 // Minimum depth for comparing 2 commits (HEAD vs HEAD~1)
+	}
+
+	// Use preloaded data if available
+	if files, ok := t.allCommitChanges[depth]; ok {
+		var changedFiles []string
+		for _, line := range files {
+			// Only include files within the service path
+			if strings.HasPrefix(line, servicePath+"/") || line == servicePath {
+				changedFiles = append(changedFiles, line)
+			}
+		}
+		return changedFiles, nil
 	}
 
 	// Get git root to run commands from there
@@ -280,6 +378,9 @@ func (t *Tracker) GetLastCommit(servicePath string) (string, error) {
 
 // IsGitRepository checks if the current directory is within a git repository
 func (t *Tracker) IsGitRepository(path string) bool {
+	if t.gitRoot != "" {
+		return true
+	}
 	cmd := exec.Command("git", "rev-parse", "--git-dir")
 	cmd.Dir = path
 	return cmd.Run() == nil

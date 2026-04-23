@@ -38,38 +38,48 @@ var (
 	version               bool
 )
 
-// PrintDockerzBanner prints the ASCII art banner with colors
+// PrintDockerzBanner prints the ASCII art banner with vibrant colors
 func PrintDockerzBanner() {
-	// Define colors
-	lightBlue := color.New(color.FgHiCyan).Add(color.Bold)
-	darkBlue := color.New(color.FgBlue).Add(color.Bold)
-	LightGrey := color.New(color.FgHiWhite)
+	// Define premium color palette
+	magenta := color.New(color.FgHiMagenta).Add(color.Bold)
+	cyan := color.New(color.FgHiCyan).Add(color.Bold)
+	green := color.New(color.FgHiGreen).Add(color.Bold)
+	white := color.New(color.FgHiWhite)
+	yellow := color.New(color.FgHiYellow)
 
-	// ASCII art for "dockerz"
+	// ASCII art for "dockerz" with a color gradient feel
 	fmt.Println()
-	lightBlue.Println(`     _            _                    `)
-	lightBlue.Println(`  __| | ___   ___| | _____ _ __ ____  `)
-	lightBlue.Println(` / _' |/ _ \ / __| |/ / _ \ '__|_  /  `)
-	darkBlue.Println(`| (_| | (_) | (__|   <  __/ |   / /   `)
-	darkBlue.Println(` \__,_|\___/ \___|_|\_\___|_|  /___|  `)
+	magenta.Println(`     _            _                    `)
+	magenta.Println(`  __| | ___   ___| | _____ _ __ ____  `)
+	cyan.Println(` / _' |/ _ \ / __| |/ / _ \ '__|_  /  `)
+	cyan.Println(`| (_| | (_) | (__|   <  __/ |   / /   `)
+	green.Println(` \__,_|\___/ \___|_|\_\___|_|  /___|  `)
 	fmt.Println()
 
-	LightGrey.Println("\nThe ultimate Docker companion tool making container management effortless")
+	white.Printf(" %s ", color.New(color.BgHiMagenta, color.FgHiWhite).Sprint(" v3.0.0 "))
+	yellow.Println(" The ultimate Docker companion for smart, parallel builds")
 	fmt.Println()
 }
 
 var rootCmd = &cobra.Command{
 	Use:   "dockerz",
-	Short: "Dockerz - Build and push multiple Docker images in parallel",
-	Long:  `Dockerz is a tool for building and pushing multiple Docker images in parallel based on a build.yaml configuration file.`,
+	Short: "🚀 Dockerz - Supercharge your Docker builds with smart orchestration",
+	Long: `Dockerz (v3.0) is a high-performance Docker orchestration tool designed for monorepos and complex CI/CD pipelines.
+
+It intelligently analyzes your repository using Git tracking, skips unchanged services, 
+and leverages multi-level caching to reduce build times by up to 90%.
+
+Quick Start:
+  1. Initialize:  dockerz init
+  2. Configure:   Edit build.yaml
+  3. Build:       dockerz build --smart`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if version {
-			fmt.Println("dockerz version 2.75.0")
+			fmt.Println("dockerz version 3.0.0")
 			return
 		}
 		PrintDockerzBanner()
-		fmt.Println("Welcome to Dockerz!")
-		fmt.Println("Use 'dockerz --help' to see available commands.")
+		fmt.Println("Ready to accelerate. Use 'dockerz --help' to see all commands.")
 	},
 }
 
@@ -79,6 +89,10 @@ var initCmd = &cobra.Command{
 	Long:  `Create a sample build.yaml configuration file in the current directory.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := config.SaveSampleConfig("build.yaml"); err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				fmt.Printf("ℹ %v. Skipping initialization.\n", err)
+				return
+			}
 			log.Fatalf("Failed to create sample config: %v", err)
 		}
 		fmt.Println("✓ Created sample build.yaml")
@@ -90,22 +104,19 @@ var initCmd = &cobra.Command{
 
 var buildCmd = &cobra.Command{
 	Use:   "build",
-	Short: "Build Docker images based on build.yaml configuration",
-	Long: `Build Docker images for all services defined in build.yaml.
+	Short: "🔨 Execute smart builds and pushes",
+	Long: `Build and push Docker images with intelligent orchestration.
 
-This command supports parallel processing, smart change detection using git tracking,
-multi-level caching (layer, local hash, and registry), and Google Artifact Registry (GAR)
-integration for secure image storage and distribution.
+Dockerz Build intelligently manages:
+  - 🧠 Smart Change Detection: Only rebuild what changed since the last build/commit.
+  - 🚄 Parallel Execution: Utilize all CPU cores for simultaneous builds and pushes.
+  - 💾 Multi-Level Caching: Layer caching + Local hash caching + Registry existence checks.
+  - ☁️ GAR Integration: First-class support for Google Artifact Registry.
 
-Key features:
-- Parallel builds with configurable process limits
-- Smart orchestration to skip unchanged services
-- Git-based change detection for incremental builds
-- Multi-level caching for faster rebuilds
-- GAR integration for GCP environments
-- File-based interfaces for CI/CD integration
-
-All flags can override corresponding settings in the configuration file.`,
+Examples:
+  dockerz build --smart --git-track --cache
+  dockerz build --smart --push-to-gar --global-tag v1.0.1
+  dockerz build --services-dir=api,worker --max-processes=4`,
 	Run: func(cmd *cobra.Command, args []string) {
 
 		// Initialize comprehensive logging

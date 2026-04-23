@@ -1,0 +1,101 @@
+name: Build and Deploy Dockerz
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'debian/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'build.yaml'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install build dependencies
+      run: sudo apt-get update && sudo apt-get install -y build-essential debhelper-compat golang-go
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+
+    - name: Clean previous build artifacts
+      run: |
+        sudo chmod -R 777 debian/.debhelper/ 2>/dev/null || true
+        sudo rm -rf debian/.debhelper/
+        sudo rm -rf debian/dockerz/
+        chmod -R 755 debian/ 2>/dev/null || true
+        chmod -x debian/install 2>/dev/null || true
+
+    - name: Build Debian package
+      env:
+        GOMODCACHE: /tmp/go-mod-cache
+        GOCACHE: /tmp/go-build-cache
+      run: |
+        dpkg-buildpackage -us -uc -b
+        # The deb file is built in the parent directory
+        DEB_FILE=$(ls ../dockerz_*.deb | head -n 1)
+        cp $DEB_FILE .
+        DEB_FILE=$(basename $DEB_FILE)
+        echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
+        echo "Deb file path: $DEB_FILE"
+        ls -la *.deb || echo "No deb files found in current directory"
+
+    - name: Checkout install branch
+      uses: actions/checkout@v4
+      with:
+        ref: install
+        path: install-repo
+        token: ${{ secrets.PAT_TOKEN }}
+
+    - name: Update install branch with new package
+      run: |
+        # Create apt directory structure if it doesn't exist
+        mkdir -p install-repo/apt/pool/main/dockerz
+        mkdir -p install-repo/apt/dists/stable/main/binary-amd64
+        
+        # Copy the new deb package
+        cp ${{ env.DEB_FILE }} install-repo/apt/pool/main/dockerz/
+        
+        # Update the apt repository
+        cd install-repo/apt
+        
+        # Generate Packages.gz
+        dpkg-scanpackages pool/main/dockerz /dev/null > dists/stable/main/binary-amd64/Packages
+        gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
+        
+        # Update Release file with current date
+        cat > dists/stable/Release << EOF
+        Origin: DevOps Toolkit
+        Label: DevOps Toolkit Repository
+        Suite: stable
+        Codename: stable
+        Version: 1.0
+        Architectures: amd64
+        Components: main
+        Description: DevOps Toolkit Debian Repository
+        Date: $(date -R)
+        EOF
+
+    - name: Commit and push changes to install branch
+      run: |
+        cd install-repo
+        git config user.name "GitHub Actions Bot"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add .
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Update dockerz package "
+          git push origin install
+        fi

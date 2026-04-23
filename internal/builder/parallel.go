@@ -64,6 +64,16 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 		log.Printf("System info: %s", GetSystemInfo())
 	}
 
+	// Initialize push manager if pushing is enabled
+	var pushMgr *PushManager
+	var mapMu sync.Mutex
+	pushResultsMap := make(map[string]chan PushResult)
+	if cfg.PushToGAR {
+		pushMgr = NewPushManager(cfg, 2) // Default to 2 concurrent pushes
+		pushMgr.Start()
+		log.Printf("Parallel pushes enabled: max_concurrent=2")
+	}
+
 	// Prepare build tasks
 	tasks := make([]BuildTask, 0, len(discoveryResult.Services))
 	for _, service := range discoveryResult.Services {
@@ -120,6 +130,13 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 				log.Printf("Worker %d: Starting build for %s", workerID, task.ServicePath)
 				result := BuildDockerImage(task)
 				
+				// Queue push if build was successful and push is requested
+				if result.Status == "success" && result.PushStatus == "queued" && pushMgr != nil {
+					mapMu.Lock()
+					pushResultsMap[result.Image] = pushMgr.QueuePush(result.Image, task.ServicePath)
+					mapMu.Unlock()
+				}
+				
 				<-sem // Release semaphore
 				
 				resultsChan <- result
@@ -145,6 +162,20 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 				fmt.Fprintf(logFile, ", Build Output: %s", result.BuildOutput)
 			}
 			fmt.Fprintf(logFile, "\n")
+		}
+	}
+
+	// Wait for all pushes and update results
+	if pushMgr != nil {
+		log.Printf("Waiting for all pushes to complete...")
+		pushMgr.Stop() // This waits for all queued pushes to finish
+		
+		for i, result := range results {
+			if resChan, exists := pushResultsMap[result.Image]; exists {
+				pushRes := <-resChan
+				results[i].PushStatus = pushRes.Status
+				results[i].PushOutput = pushRes.Output
+			}
 		}
 	}
 

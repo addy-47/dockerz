@@ -3,6 +3,7 @@ package smart
 import (
 	"fmt"
 	"log"
+	"os/exec"
 	"time"
 
 	"github.com/addy-47/dockerz/internal/cache"
@@ -87,9 +88,22 @@ func (o *Orchestrator) OrchestrateBuilds(cfg *config.Config, services []discover
 		return result, nil
 	}
 
+	// Preload all git changes once if tracking is enabled
+	if o.config.GitTracking {
+		depth := o.config.GitTrackDepth
+		if depth == 0 {
+			depth = 2
+		}
+		if err := o.gitTracker.PreloadChanges(depth); err != nil {
+			if o.logger != nil {
+				o.logger.Warn(logging.CATEGORY_SMART, fmt.Sprintf("Failed to preload git changes: %v. Falling back to sequential checks.", err))
+			}
+		}
+	}
+
 	// Analyze each service
 	for _, service := range services {
-		state, decision := o.analyzeService(service)
+		state, decision := o.analyzeService(cfg, service)
 		result.ServiceStates = append(result.ServiceStates, state)
 
 		switch decision {
@@ -106,7 +120,7 @@ func (o *Orchestrator) OrchestrateBuilds(cfg *config.Config, services []discover
 }
 
 // analyzeService determines if a service needs to be built
-func (o *Orchestrator) analyzeService(service discovery.DiscoveredService) (ServiceState, BuildDecision) {
+func (o *Orchestrator) analyzeService(cfg *config.Config, service discovery.DiscoveredService) (ServiceState, BuildDecision) {
 	state := ServiceState{
 		ServiceName: service.Name,
 	}
@@ -140,6 +154,28 @@ func (o *Orchestrator) analyzeService(service discovery.DiscoveredService) (Serv
 	
 	if o.logger != nil {
 		o.logger.Debug(logging.CATEGORY_GIT, fmt.Sprintf("Checking git changes for %s (depth: %d)", service.Name, depth))
+	}
+
+	// 1. Check if image already exists in registry (Registry-First Strategy)
+	// Even if there are git changes, if the image for this tag already exists, we can skip.
+	if cfg.UseGAR {
+		var imageFullName string
+		imageFullName = fmt.Sprintf("%s-docker.pkg.dev/%s/%s/%s:%s",
+			cfg.Region, cfg.Project, cfg.GAR, service.ImageName, service.Tag)
+
+		if o.logger != nil {
+			o.logger.Debug(logging.CATEGORY_SMART, fmt.Sprintf("Checking registry for %s", imageFullName))
+		}
+
+		if o.CheckGARImageExists(imageFullName) {
+			if o.logger != nil {
+				o.logger.Info(logging.CATEGORY_SMART, fmt.Sprintf("%s: SKIP_BUILD - image already exists in registry: %s", service.Name, imageFullName))
+			}
+			state.GARImageExists = true
+			state.GARConfigured = true
+			state.GARReachable = true
+			return state, SkipBuild
+		}
 	}
 
 	changedFiles, err := o.gitTracker.GetChangedFiles(service.Path, depth)
@@ -210,18 +246,24 @@ func (o *Orchestrator) CheckGARConnectivity(serviceName string) (configured, rea
 	return false, false
 }
 
-// CheckGARImageExists checks if the service image exists in GAR
-func (o *Orchestrator) CheckGARImageExists(serviceName, imageHash string) bool {
-	// TODO: Phase 3 - Implement actual GAR image existence checks
-	// For now, return placeholder
-	log.Printf("GAR image existence check for %s: placeholder implementation", serviceName)
-	return false
+// CheckGARImageExists checks if the service image exists in GAR using docker manifest inspect
+func (o *Orchestrator) CheckGARImageExists(imageFullName string) bool {
+	// Use 'docker manifest inspect' to check for image existence without pulling.
+	// This requires the registry to be authenticated (e.g. via gcloud auth configure-docker).
+	cmd := exec.Command("docker", "manifest", "inspect", imageFullName)
+	
+	// We don't want to pollute stdout with manifest JSON, so we discard it.
+	// We only care about the exit code.
+	err := cmd.Run()
+	return err == nil
 }
 
 // UpdateGARState updates the service state with GAR information
-func (o *Orchestrator) UpdateGARState(state *ServiceState, serviceName string) {
-	state.GARConfigured, state.GARReachable = o.CheckGARConnectivity(serviceName)
+func (o *Orchestrator) UpdateGARState(cfg *config.Config, state *ServiceState, service discovery.DiscoveredService) {
+	state.GARConfigured, state.GARReachable = o.CheckGARConnectivity(service.Name)
 	if state.GARConfigured && state.GARReachable {
-		state.GARImageExists = o.CheckGARImageExists(serviceName, state.CurrentHash)
+		imageFullName := fmt.Sprintf("%s-docker.pkg.dev/%s/%s/%s:%s",
+			cfg.Region, cfg.Project, cfg.GAR, service.ImageName, service.Tag)
+		state.GARImageExists = o.CheckGARImageExists(imageFullName)
 	}
 }

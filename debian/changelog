@@ -1,3 +1,13 @@
+dockerz (3.0.0-1) jammy; urgency=medium
+
+  * Phase 3: Added registry-first build skipping (GAR image existence check).
+  * Major performance optimizations: cached Git root and consolidated operations.
+  * Parallel image pushes integrated into build workflow.
+  * Safe configuration initialization for CI/CD environments.
+  * Optimized Cloud Build pipeline with blobless clones.
+
+ -- Adhbhut Gupta <adhbutg@gmail.com>  Thu, 23 Apr 2026 12:45:00 +0530
+
 dockerz (2.75.0-1) jammy; urgency=medium
 
   * Major release with comprehensive Git operations enhancement and testing completion.

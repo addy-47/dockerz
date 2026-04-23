@@ -58,7 +58,10 @@ func BuildDockerImage(task BuildTask) BuildResult {
 	var buildCmd *exec.Cmd
 	if task.Config.EnableBuildKit {
 		// Use BuildKit for better caching and performance
-		buildCmd = exec.Command("docker", "build", "--progress=plain", "--cache-from=type=registry,ref="+imageFullName, "-t", imageFullName, ".")
+		buildCmd = exec.Command("docker", "buildx", "build", "--load", "--progress=plain",
+			"--cache-from=type=registry,ref="+imageFullName,
+			"--cache-to=type=inline",
+			"-t", imageFullName, ".")
 		buildCmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1", "BUILDKIT_PROGRESS=plain")
 		log.Printf("Building %s with BuildKit enabled", imageFullName)
 	} else {

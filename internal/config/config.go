@@ -116,8 +116,13 @@ func LoadConfig(configPath string) (*Config, error) {
 	return &config, nil
 }
 
-// SaveSampleConfig creates a sample build.yaml file
+// SaveSampleConfig creates a sample build.yaml file if it doesn't already exist
 func SaveSampleConfig(filename string) error {
+	// Check if file already exists
+	if _, err := os.Stat(filename); err == nil {
+		return fmt.Errorf("config file %s already exists", filename)
+	}
+
 	sampleYAML := `# Dockerz Configuration File
 # This file configures how Dockerz builds and manages your microservices.
 # All paths are relative to the project root unless specified as absolute paths.

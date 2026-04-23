@@ -48,7 +48,7 @@ steps:
       - -c
       - |
         echo "Cloning repository..."
-        git clone --recurse-submodules git@github.com:HYPR4/unicommerce.git
+        git clone --filter=blob:none --recurse-submodules git@github.com:HYPR4/unicommerce.git
         cd unicommerce
         git checkout $BRANCH_NAME
         echo "Repository cloned and checked out to branch: $BRANCH_NAME"
