@@ -1,4 +1,4 @@
-# Dockerz v2.75.0 - The Ultimate Docker Companion Tool
+# Dockerz v3.0.0 - The Ultimate Docker Companion Tool
 
 ```
      _            _                    
@@ -22,13 +22,13 @@ Dockerz is a powerful CLI tool for building and pushing multiple Docker images i
 - **Flexible Configuration**: YAML-based configuration with comprehensive CLI flag overrides
 - **Cross-Platform**: Works on Linux, macOS, and Windows (WSL2)
 
-### 🧠 Smart Features (v2.75)
-- **Git Change Detection**: Automatically detect which services have changed using git diff analysis
-- **Multi-Level Caching**: Layer, local hash, and registry-based caching for optimal performance
-- **Smart Build Orchestration**: Intelligently skip unchanged services, only rebuild what needs rebuilding
-- **SHA256 Hash Calculation**: Content-based hashing for accurate change detection
-- **CI/CD Integration**: Input/output files for changed services to integrate with external CI/CD systems
-- **Intelligent Discovery**: Auto-excludes build directories, dependency folders, and version control systems
+### 🧠 Smart Features (v3.0.0)
+- **Registry-First Skipping**: Check remote registry (GAR) before building. Skip if image exists.
+- **Git Change Detection**: Optimized preloaded git diff analysis for instant results.
+- **Multi-Level Caching**: Layer, local hash, and registry-based caching.
+- **Parallel Execution**: simultaneous builds and background registry pushes.
+- **Smart Build Orchestration**: Intelligently skip unchanged services, only rebuild what needs rebuilding.
+- **CI/CD Integration**: Optimized for Cloud Build and GitHub Actions with minimal configuration.
 
 ### 🏗️ Modular Architecture
 Dockerz is built with a modular internal structure:
@@ -141,7 +141,7 @@ dockerz build
 dockerz build --max-processes 8
 
 # Build with custom configuration
-dockerz build --project my-project --region us-west1 --gar my-registry --global-tag v2.75.0
+dockerz build --project my-project --region us-west1 --gar my-registry --global-tag v3.0.0
 ```
 
 ### Smart Features Usage
@@ -461,4 +461,4 @@ GOOS=windows GOARCH=amd64 go build -o dockerz-windows-amd64.exe ./cmd/dockerz
 
 ---
 
-**Dockerz v2.75.0** - Making container build orchestration intelligent, fast, and developer-friendly.
+**Dockerz v3.0.0** - Making container build orchestration intelligent, fast, and developer-friendly.

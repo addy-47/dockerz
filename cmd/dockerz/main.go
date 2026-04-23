@@ -64,7 +64,7 @@ func PrintDockerzBanner() {
 var rootCmd = &cobra.Command{
 	Use:   "dockerz",
 	Short: "🚀 Dockerz - Supercharge your Docker builds with smart orchestration",
-	Long: `Dockerz (v3.0) is a high-performance Docker orchestration tool designed for monorepos and complex CI/CD pipelines.
+	Long: `Dockerz (v3.0.0) is a high-performance Docker orchestration tool designed for monorepos and complex CI/CD pipelines.
 
 It intelligently analyzes your repository using Git tracking, skips unchanged services, 
 and leverages multi-level caching to reduce build times by up to 90%.
