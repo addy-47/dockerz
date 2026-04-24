@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Default configuration
-REPO_URL="https://addy-47.github.io/scripts/"
+REPO_URL="https://addy-47.github.io/dockerz/"
 DEFAULT_TOOLS="dockerz,u-cli"
 CI_MODE=false
 INTERACTIVE=true

@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # Default values
-REPO_URL="https://addy-47.github.io/scripts/"
+REPO_URL="https://addy-47.github.io/dockerz/"
 REPO_NAME="devops-toolkit"
 REPO_LIST_FILE="/etc/apt/sources.list.d/${REPO_NAME}.list"
 PUBLIC_KEY_URL="${REPO_URL}public.gpg"

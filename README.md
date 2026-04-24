@@ -7,7 +7,7 @@ A collection of DevOps scripts and tools.
 You can install the tools using our single-line installer:
 
 ```bash
-curl -fsSL https://addy-47.github.io/scripts/install.sh | bash
+curl -fsSL https://addy-47.github.io/dockerz/install.sh | bash
 ```
 
 This will install `dockerz` and `u-cli` by default.
@@ -15,7 +15,7 @@ This will install `dockerz` and `u-cli` by default.
 ### Install Specific Tools
 
 ```bash
-curl -fsSL https://addy-47.github.io/scripts/install.sh | bash -s -- dockerz
+curl -fsSL https://addy-47.github.io/dockerz/install.sh | bash -s -- dockerz
 ```
 
 ### CI / Automated Installation
@@ -23,22 +23,22 @@ curl -fsSL https://addy-47.github.io/scripts/install.sh | bash -s -- dockerz
 For CI environments (non-interactive, assumes root):
 
 ```bash
-curl -fsSL https://addy-47.github.io/scripts/install.sh | bash -s -- --ci
+curl -fsSL https://addy-47.github.io/dockerz/install.sh | bash -s -- --ci
 ```
 
 ### Uninstall
 
 ```bash
-curl -fsSL https://addy-47.github.io/scripts/install.sh | bash -s -- --remove
-curl -fsSL https://addy-47.github.io/scripts/uninstall.sh | bash
+curl -fsSL https://addy-47.github.io/dockerz/install.sh | bash -s -- --remove
+curl -fsSL https://addy-47.github.io/dockerz/uninstall.sh | bash
 ```
 
 ## Repository Information
 
 The APT repository is hosted via GitHub Pages.
 
-- **URL**: `https://addy-47.github.io/scripts/`
-- **Public Key**: `https://addy-47.github.io/scripts/public.gpg`
+- **URL**: `https://addy-47.github.io/dockerz/`
+- **Public Key**: `https://addy-47.github.io/dockerz/public.gpg`
 
 ## Maintenance
 

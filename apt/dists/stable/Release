@@ -1,9 +1,23 @@
-Origin: DevOps Toolkit
-Label: DevOps Toolkit Repository
-Suite: stable
-Codename: stable
-Version: 1.0
 Architectures: amd64
+Codename: stable
 Components: main
-Description: DevOps Toolkit Debian Repository
-Date: Thu, 23 Apr 2026 18:51:57 +0000
+Date: Fri, 24 Apr 2026 06:34:05 +0000
+Label: DevOpsToolkit
+Origin: DevOpsToolkit
+Suite: stable
+MD5Sum:
+ f71fab1fb9afe9d0ab67a3e67fa1e192              150 Release
+ 13a7bf78e031cf055ada29985d711eff             2898 main/binary-amd64/Packages
+ c41f7b766fc45571c7c3d5414734ac43              985 main/binary-amd64/Packages.gz
+SHA1:
+ 4a5a121213299ac4f94d8b5a7018624d491c3352              150 Release
+ d6c1515dc20c35fe1bd1cbfb279b4f2b97c21b67             2898 main/binary-amd64/Packages
+ 1325bdc5d660000803a287df7cff44558baca1c5              985 main/binary-amd64/Packages.gz
+SHA256:
+ aeb49de0aa00b5c51c77eed269f33d5d69c176d5d609c5974786a0be721e6e78              150 Release
+ 5babbb57d81091d20eb0c7c69473f671258b609b4eefab7fc0bdf564fc71ea23             2898 main/binary-amd64/Packages
+ 9d280d62c38d538d80e54f22de8e15a5725665ef6befbaaa231bb5edce8c349e              985 main/binary-amd64/Packages.gz
+SHA512:
+ d5a22679d41a3180957265921dbffd8481d6b844971a1c3bfcbc4604fce85eabc819d29c1dabc035f15997d01b285ddee010d452fa24d81a7fe9c367a11b53a3              150 Release
+ b321fcdfba0052e4c743dbae5ae68fb1c2fd710c1f426298df8f8f93844f7cb44a9ee9c45d55fbe811e6f25a3bf2617556348011ff0e33bde6ff94b1d78631d2             2898 main/binary-amd64/Packages
+ c9a2b147e4dac8fcb5fdc52ab30bfa5479f04d8ac2a04dbc8902cc78bd097e861085678133dad8ebc05adb6eada807abea014d71883d453ee82e6fda1b36ccb1              985 main/binary-amd64/Packages.gz
