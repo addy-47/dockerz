@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # DevOps Toolkit Installer
-# Installs dockerz and u-cli from the addy-47/scripts APT repository.
+# Installs dockerz from the addy-47/dockerz APT repository.
 
 set -euo pipefail
 
 # Default configuration
 REPO_URL="https://addy-47.github.io/dockerz/"
-DEFAULT_TOOLS="dockerz,u-cli"
+DEFAULT_TOOLS="dockerz"
 CI_MODE=false
 INTERACTIVE=true
 REMOVE_MODE=false
@@ -32,14 +32,14 @@ Usage: $0 [options] [package...]
 
 Options:
   --ci                  CI mode: non-interactive, assumes root, installs only dockerz by default
-  --tools=LIST          Comma-separated list of tools to install (default: dockerz,u-cli)
+  --tools=LIST          Comma-separated list of tools to install (default: dockerz)
   --remove, --uninstall Uninstall specified tools
   --purge-repo          Remove the APT repository and keyring (use with --remove)
   -y, --yes             Non-interactive mode (assume yes)
   -h, --help            Show this help message
 
 Examples:
-  $0                    # Install default tools (dockerz, u-cli)
+  $0                    # Install dockerz
   $0 dockerz            # Install only dockerz
   $0 --ci               # CI mode (installs dockerz)
   $0 --remove dockerz   # Uninstall dockerz
