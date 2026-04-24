@@ -1,16 +1,16 @@
-# Scripts & Tools
+# Dockerz Installation & Scripts
 
-A collection of DevOps scripts and tools.
+This branch contains the installation scripts and APT repository for **Dockerz v3.0.0**.
 
 ## Installation
 
-You can install the tools using our single-line installer:
+You can install Dockerz using our single-line installer:
 
 ```bash
 curl -fsSL https://addy-47.github.io/dockerz/install.sh | bash
 ```
 
-This will install `dockerz` and `u-cli` by default.
+This will install `dockerz` by default.
 
 ### Install Specific Tools
 
