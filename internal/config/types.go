@@ -40,6 +40,14 @@ type Config struct {
 	
 	// BuildKit configuration
 	EnableBuildKit bool `yaml:"enable_buildkit,omitempty" mapstructure:"enable_buildkit"`
+
+	// Push configuration
+	PushConcurrency int    `yaml:"push_concurrency,omitempty" mapstructure:"push_concurrency"`
+	CacheType       string `yaml:"cache_type,omitempty" mapstructure:"cache_type"`
+
+	// Cache TTL configuration (Go duration strings like "5m", "24h")
+	GitCacheTTL string `yaml:"git_cache_ttl,omitempty" mapstructure:"git_cache_ttl"`
+	CacheTTL    string `yaml:"cache_ttl,omitempty" mapstructure:"cache_ttl"`
 }
 
 // BuildResult represents the result of a build operation

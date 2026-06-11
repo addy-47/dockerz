@@ -69,9 +69,13 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 	var mapMu sync.Mutex
 	pushResultsMap := make(map[string]chan PushResult)
 	if cfg.PushToGAR {
-		pushMgr = NewPushManager(cfg, 2) // Default to 2 concurrent pushes
+		pushConcurrency := cfg.PushConcurrency
+		if pushConcurrency == 0 {
+			pushConcurrency = 2
+		}
+		pushMgr = NewPushManager(cfg, pushConcurrency)
 		pushMgr.Start()
-		log.Printf("Parallel pushes enabled: max_concurrent=2")
+		log.Printf("Parallel pushes enabled: max_concurrent=%d", pushConcurrency)
 	}
 
 	// Prepare build tasks

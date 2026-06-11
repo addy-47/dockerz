@@ -15,6 +15,7 @@ func NewTracker() *Tracker {
 		logger:           nil, // Will be set by caller
 		cache:            NewGitCache(),
 		allCommitChanges: make(map[int][]string),
+		gitCacheTTL:      5 * time.Minute, // Default TTL
 	}
 }
 
@@ -144,8 +145,8 @@ func (t *Tracker) GetChangedFiles(servicePath string, depth int) ([]string, erro
 				t.logger.Debug(logging.CATEGORY_GIT, fmt.Sprintf("Found %d uncommitted changes in %s", len(statusFiles), servicePath))
 			}
 
-			// Cache the result
-			t.cache.CacheStatus(servicePath, depth, statusFiles, 5*time.Minute)
+			// Cache the result with configured TTL
+			t.cache.CacheStatus(servicePath, depth, statusFiles, t.gitCacheTTL)
 
 			// Add status files to result
 			for _, file := range statusFiles {
@@ -201,8 +202,8 @@ func (t *Tracker) GetChangedFiles(servicePath string, depth int) ([]string, erro
 				t.logger.Debug(logging.CATEGORY_GIT, fmt.Sprintf("Found %d commit changes in %s", len(commitFiles), servicePath))
 			}
 
-			// Cache the result
-			t.cache.CacheDiff(servicePath, depth, commitFiles, 5*time.Minute)
+			// Cache the result with configured TTL
+			t.cache.CacheDiff(servicePath, depth, commitFiles, t.gitCacheTTL)
 
 			// Add commit files to result (deduplicated)
 			for _, file := range commitFiles {
@@ -256,7 +257,7 @@ func (t *Tracker) getUncommittedChanges(servicePath string) ([]string, error) {
 	// Get git root to run commands from there
 	gitRoot, err := t.getGitRoot()
 	if err != nil {
-		return nil, fmt.Errorf("not a git repository: %w", err)
+		return nil, fmt.Errorf("not a git repository at %s: %w", servicePath, err)
 	}
 
 	// Run git status from repository root with service path as filter
@@ -313,7 +314,7 @@ func (t *Tracker) getCommitChanges(servicePath string, depth int) ([]string, err
 	// Get git root to run commands from there
 	gitRoot, err := t.getGitRoot()
 	if err != nil {
-		return nil, fmt.Errorf("not a git repository: %w", err)
+		return nil, fmt.Errorf("not a git repository at %s: %w", servicePath, err)
 	}
 
 	// Calculate the comparison range: HEAD~(depth-1) to HEAD
@@ -363,7 +364,7 @@ func (t *Tracker) getCommitChanges(servicePath string, depth int) ([]string, err
 func (t *Tracker) GetLastCommit(servicePath string) (string, error) {
 	gitRoot, err := t.getGitRoot()
 	if err != nil {
-		return "", fmt.Errorf("not a git repository: %w", err)
+		return "", fmt.Errorf("not a git repository at %s: %w", servicePath, err)
 	}
 
 	cmd := exec.Command("git", "log", "-1", "--format=%H", "--", servicePath)
@@ -390,12 +391,12 @@ func (t *Tracker) IsGitRepository(path string) bool {
 func (t *Tracker) GetServiceChanges(servicePath string) (*DiffResult, error) {
 	gitRoot, err := t.getGitRoot()
 	if err != nil {
-		return nil, fmt.Errorf("not a git repository: %s", servicePath)
+		return nil, fmt.Errorf("not a git repository at %s", servicePath)
 	}
 
 	// Verify we're in a git repository
 	if !t.IsGitRepository(gitRoot) {
-		return nil, fmt.Errorf("not a git repository: %s", servicePath)
+		return nil, fmt.Errorf("not a git repository at %s", servicePath)
 	}
 
 	// Get uncommitted changes for the service

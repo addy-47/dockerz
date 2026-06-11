@@ -36,6 +36,11 @@ var (
 	pushToGAR             bool
 	servicesDir           string
 	version               bool
+	dryRun                bool
+	pushConcurrency       int
+	cacheType             string
+	gitCacheTTL           string
+	cacheTTL              string
 )
 
 // PrintDockerzBanner prints the ASCII art banner with vibrant colors
@@ -99,6 +104,125 @@ var initCmd = &cobra.Command{
 		fmt.Println("\nNext steps:")
 		fmt.Println("1. Edit build.yaml to configure your services")
 		fmt.Println("2. Run 'dockerz build' to build your images")
+	},
+}
+
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Validate and inspect configuration",
+	Long:  `Manage and validate dockerz configuration.`,
+}
+
+var configValidateCmd = &cobra.Command{
+	Use:   "validate",
+	Short: "Validate the build.yaml configuration file",
+	Long: `Validate the build.yaml configuration file for correctness.
+Checks YAML structure, required fields, file paths, and service directories.
+
+Examples:
+  dockerz config validate
+  dockerz config validate --config path/to/build.yaml`,
+	Run: func(cmd *cobra.Command, args []string) {
+		cfgPath := configPath
+		if cfgPath == "" {
+			cfgPath = "build.yaml"
+		}
+
+		fmt.Printf("Validating configuration: %s\n", cfgPath)
+
+		// Load and validate the config
+		cfg, err := config.LoadConfig(cfgPath)
+		if err != nil {
+			fmt.Printf("❌ Configuration validation failed:\n   %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Println("✅ YAML structure valid")
+
+		// Validate service directories
+		if len(cfg.Services) > 0 {
+			fmt.Printf("✅ %d explicit services defined\n", len(cfg.Services))
+			for _, svc := range cfg.Services {
+				fmt.Printf("   - %s", svc.Name)
+				if svc.ImageName != "" {
+					fmt.Printf(" (image: %s)", svc.ImageName)
+				}
+				if svc.Tag != "" {
+					fmt.Printf(" (tag: %s)", svc.Tag)
+				}
+				fmt.Println()
+			}
+		}
+
+		if len(cfg.ServicesDir) > 0 {
+			fmt.Printf("✅ %d service directories configured\n", len(cfg.ServicesDir))
+			for _, dir := range cfg.ServicesDir {
+				fmt.Printf("   - %s\n", dir)
+			}
+		}
+
+		if cfg.UseGAR {
+			fmt.Printf("✅ GAR configured: %s/%s/%s\n", cfg.Region, cfg.Project, cfg.GAR)
+		}
+
+		if cfg.InputChangedServices != "" {
+			fmt.Printf("✅ Input changed services file: %s\n", cfg.InputChangedServices)
+		}
+
+		if cfg.OutputChangedServices != "" {
+			fmt.Printf("✅ Output changed services file: %s\n", cfg.OutputChangedServices)
+		}
+
+		fmt.Printf("\n📋 Configuration summary:\n")
+		fmt.Printf("   Max processes:     %d\n", cfg.MaxProcesses)
+		fmt.Printf("   Global tag:        %s\n", cfg.GlobalTag)
+		fmt.Printf("   BuildKit:          %v\n", cfg.EnableBuildKit)
+		fmt.Printf("   Push concurrency:  %d\n", cfg.PushConcurrency)
+		fmt.Printf("   Cache type:        %s\n", cfg.CacheType)
+		fmt.Printf("   Git cache TTL:     %s\n", cfg.GitCacheTTL)
+		fmt.Printf("   Cache TTL:         %s\n", cfg.CacheTTL)
+		fmt.Printf("   Smart:             %v\n", cfg.Smart)
+		fmt.Printf("   Git track:         %v\n", cfg.GitTrack)
+		fmt.Printf("   Cache:             %v\n", cfg.Cache)
+		fmt.Printf("   Force rebuild:     %v\n", cfg.Force)
+
+		fmt.Println("\n✅ Configuration is valid")
+	},
+}
+
+var completionCmd = &cobra.Command{
+	Use:   "completion [bash|zsh|fish]",
+	Short: "Generate shell completion scripts",
+	Long: `Generate shell completion scripts for dockerz.
+
+To use, source the output in your shell:
+
+  Bash:
+    source <(dockerz completion bash)
+    # or save to file:
+    dockerz completion bash > /etc/bash_completion.d/dockerz
+
+  Zsh:
+    source <(dockerz completion zsh)
+    # or save to file:
+    dockerz completion zsh > /usr/local/share/zsh/site-functions/_dockerz
+
+  Fish:
+    dockerz completion fish > ~/.config/fish/completions/dockerz.fish`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		shell := args[0]
+		switch shell {
+		case "bash":
+			cmd.Root().GenBashCompletion(os.Stdout)
+		case "zsh":
+			cmd.Root().GenZshCompletion(os.Stdout)
+		case "fish":
+			cmd.Root().GenFishCompletion(os.Stdout, true)
+		default:
+			fmt.Fprintf(os.Stderr, "Unsupported shell: %s. Use: bash, zsh, or fish\n", shell)
+			os.Exit(1)
+		}
 	},
 }
 
@@ -192,6 +316,12 @@ Examples:
 		}
 		if cmd.Flags().Changed("push-to-gar") {
 			cfg.PushToGAR = pushToGAR
+		}
+		if cmd.Flags().Changed("push-concurrency") {
+			cfg.PushConcurrency = pushConcurrency
+		}
+		if cmd.Flags().Changed("cache-type") {
+			cfg.CacheType = cacheType
 		}
 		if servicesDir != "" {
 			// Parse comma-separated services directories
@@ -380,6 +510,30 @@ Examples:
 			}
 		}
 
+		// Dry-run: print what would be built and exit
+		if dryRun {
+			logger.PrintSection("DRY RUN")
+			logger.Info(logging.CATEGORY_BUILD, "Dry-run mode: no images will be built")
+			logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Services to build: %d of %d discovered", len(servicesToBuild), len(discoveryResult.Services)))
+			for _, service := range servicesToBuild {
+				logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("  Would build: %s (%s:%s)", service.Name, service.ImageName, service.Tag))
+			}
+			for _, service := range discoveryResult.Services {
+				isBuilding := false
+				for _, toBuild := range servicesToBuild {
+					if toBuild.Name == service.Name {
+						isBuilding = true
+						break
+					}
+				}
+				if !isBuilding {
+					logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("  Would skip:  %s (no changes detected)", service.Name))
+				}
+			}
+			logger.Info(logging.CATEGORY_BUILD, "Dry-run complete. Pass --dry-run=false to build.")
+			return
+		}
+
 		// Create new discovery result with filtered services
 		filteredResult := &discovery.DiscoveryResult{
 			Services: servicesToBuild,
@@ -434,6 +588,10 @@ func init() {
 
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(buildCmd)
+	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(completionCmd)
+
+	configCmd.AddCommand(configValidateCmd)
 
 	rootCmd.Flags().BoolVarP(&version, "version", "v", false, "Print version information")
 
@@ -455,6 +613,18 @@ func init() {
 	buildCmd.Flags().BoolVar(&smartEnabled, "smart", false, "Enable smart build orchestration with automatic dependency analysis and optimization")
 	buildCmd.Flags().BoolVar(&useGAR, "use-gar", false, "Use Google Artifact Registry naming convention for image tags (requires GAR authentication)")
 	buildCmd.Flags().BoolVar(&pushToGAR, "push-to-gar", false, "Automatically push built images to Google Artifact Registry after successful builds")
+
+	// Phase 1 new flags
+	buildCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview what would be built without executing Docker builds")
+	buildCmd.Flags().IntVar(&pushConcurrency, "push-concurrency", 0, "Maximum concurrent image pushes to registry (default: 2)")
+	buildCmd.Flags().StringVar(&cacheType, "cache-type", "", "BuildKit cache mode: none, inline, registry (default: inline)")
+
+	// Cache TTL flags
+	buildCmd.Flags().StringVar(&gitCacheTTL, "git-cache-ttl", "", "Git operation cache TTL (Go duration format, e.g. \"5m\", \"1h\")")
+	buildCmd.Flags().StringVar(&cacheTTL, "cache-ttl", "", "Build cache TTL (Go duration format, e.g. \"24h\", \"72h\")")
+
+	// Reuse config path flag for config validate command
+	configValidateCmd.Flags().StringVarP(&configPath, "config", "c", "build.yaml", "Path to the build.yaml configuration file")
 }
 
 func main() {

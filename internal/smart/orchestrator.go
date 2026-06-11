@@ -37,24 +37,29 @@ func NewOrchestrator(config *SmartConfig) *Orchestrator {
 			Level:   config.CacheLevel,
 			TTL:     config.CacheTTL,
 		})
-	case cache.DistributedCacheLevel:
-		cacheMgr = cache.NewDistributedCache(&cache.CacheConfig{
+	case cache.FileCacheLevel:
+		cacheMgr = cache.NewFileCache(&cache.CacheConfig{
 			Enabled: config.CacheEnabled,
 			Level:   config.CacheLevel,
 			TTL:     config.CacheTTL,
 		})
 	default:
-		cacheMgr = cache.NewDistributedCache(&cache.CacheConfig{
+		cacheMgr = cache.NewFileCache(&cache.CacheConfig{
 			Enabled: config.CacheEnabled,
 			Level:   config.CacheLevel,
 			TTL:     config.CacheTTL,
 		})
 	}
 
+	gitTracker := git.NewTracker()
+	if config.GitCacheTTL > 0 {
+		gitTracker.SetGitCacheTTL(config.GitCacheTTL)
+	}
+
 	return &Orchestrator{
 		config:     config,
 		cacheMgr:   cacheMgr,
-		gitTracker: git.NewTracker(),
+		gitTracker: gitTracker,
 		logger:     nil, // Will be set by caller
 	}
 }
@@ -66,8 +71,12 @@ func (o *Orchestrator) SetLogger(logger *logging.Logger) {
 	switch cacheMgr := o.cacheMgr.(type) {
 	case *cache.RegistryCache:
 		cacheMgr.SetLogger(logger)
-	case *cache.DistributedCache:
+	case *cache.FileCache:
 		cacheMgr.SetLogger(logger)
+	}
+	// Set logger for git tracker
+	if o.gitTracker != nil {
+		o.gitTracker.SetLogger(logger)
 	}
 }
 

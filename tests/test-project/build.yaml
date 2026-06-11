@@ -34,6 +34,14 @@ global_tag: latest
 # Override with --max-processes flag
 max_processes: 4
 
+# Maximum number of concurrent image pushes to registry
+# Override with --push-concurrency flag
+push_concurrency: 2
+
+# BuildKit cache mode: none, inline, or registry
+# Override with --cache-type flag
+cache_type: inline
+
 # Whether to use Google Artifact Registry for image naming and pushing
 # When true: images use GAR naming (region-docker.pkg.dev/project/gar/service:tag)
 # When false: images use local naming (service:tag)
@@ -70,6 +78,13 @@ cache: false
 # Useful for clean builds or when cache is corrupted
 # Use --force flag to enable
 force: false
+
+# ===== CACHE TTL CONFIGURATION =====
+# How long to cache git operation results (Go duration format)
+git_cache_ttl: 5m
+
+# How long to cache build results before considering them stale (Go duration format)
+cache_ttl: 24h
 
 # ===== CHANGE DETECTION FILES =====
 # File paths for storing lists of changed services (used with git_track)

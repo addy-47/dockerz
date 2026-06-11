@@ -20,6 +20,7 @@ type SmartConfig struct {
 	Enabled         bool          `yaml:"enabled" mapstructure:"enabled"`
 	GitTracking     bool          `yaml:"git_tracking" mapstructure:"git_tracking"`
 	GitTrackDepth   int           `yaml:"git_track_depth" mapstructure:"git_track_depth"`
+	GitCacheTTL     time.Duration `yaml:"git_cache_ttl" mapstructure:"git_cache_ttl"`
 	CacheEnabled    bool          `yaml:"cache_enabled" mapstructure:"cache_enabled"`
 	CacheLevel      cache.CacheLevel `yaml:"cache_level" mapstructure:"cache_level"`
 	CacheTTL        time.Duration `yaml:"cache_ttl" mapstructure:"cache_ttl"`

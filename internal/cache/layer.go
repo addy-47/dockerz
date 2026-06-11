@@ -53,7 +53,7 @@ func (l *LayerCache) Set(entry *CacheEntry) error {
 
 	data, err := json.MarshalIndent(entry, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal cache entry: %w", err)
+		return fmt.Errorf("failed to marshal cache entry for %s: %w", entry.ServiceName, err)
 	}
 
 	return os.WriteFile(cacheFile, data, 0644)

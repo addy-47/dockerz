@@ -56,14 +56,30 @@ func BuildDockerImage(task BuildTask) BuildResult {
 
 	// Build the image
 	var buildCmd *exec.Cmd
-	if task.Config.EnableBuildKit {
+	cacheType := task.Config.CacheType
+	if cacheType == "" {
+		cacheType = "inline" // Default fallback
+	}
+
+	if task.Config.EnableBuildKit && cacheType != "none" {
 		// Use BuildKit for better caching and performance
-		buildCmd = exec.Command("docker", "buildx", "build", "--load", "--progress=plain",
-			"--cache-from=type=registry,ref="+imageFullName,
-			"--cache-to=type=inline",
-			"-t", imageFullName, ".")
+		args := []string{"buildx", "build", "--load", "--progress=plain"}
+
+		switch cacheType {
+		case "inline":
+			args = append(args,
+				"--cache-from=type=registry,ref="+imageFullName,
+				"--cache-to=type=inline")
+		case "registry":
+			args = append(args,
+				"--cache-from=type=registry,ref="+imageFullName,
+				"--cache-to=type=registry,ref="+imageFullName+",mode=max")
+		}
+
+		args = append(args, "-t", imageFullName, ".")
+		buildCmd = exec.Command("docker", args...)
 		buildCmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1", "BUILDKIT_PROGRESS=plain")
-		log.Printf("Building %s with BuildKit enabled", imageFullName)
+		log.Printf("Building %s with BuildKit (cache: %s)", imageFullName, cacheType)
 	} else {
 		// Use traditional docker build
 		buildCmd = exec.Command("docker", "build", "-t", imageFullName, ".")

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/addy-47/dockerz/internal/logging"
@@ -45,6 +46,15 @@ type Tracker struct {
 	allUncommittedChanges []string
 	allCommitChanges      map[int][]string
 	lastCommit            string
-	logger     *logging.Logger
-	cache      *GitCache
+	gitCacheTTL           time.Duration
+	logger                *logging.Logger
+	cache                 *GitCache
+}
+
+// SetGitCacheTTL sets the TTL for git operation caches (status and diff)
+func (t *Tracker) SetGitCacheTTL(ttl time.Duration) {
+	t.gitCacheTTL = ttl
+	if t.logger != nil {
+		t.logger.Debug(logging.CATEGORY_GIT, fmt.Sprintf("Git cache TTL set to %v", ttl))
+	}
 }

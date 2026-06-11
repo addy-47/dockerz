@@ -11,7 +11,7 @@ const (
 	LayerCacheLevel CacheLevel = iota
 	LocalHashCache
 	RegistryCacheLevel
-	DistributedCacheLevel
+	FileCacheLevel
 )
 
 // CacheEntry represents a cached build result

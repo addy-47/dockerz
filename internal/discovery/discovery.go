@@ -144,73 +144,12 @@ func discoverExplicitServices(cfg *config.Config, defaultTag string) ([]Discover
 	return services, errors
 }
 
-// discoverFromDirectories discovers services in specified directories
-func discoverFromDirectories(dirs []string, defaultTag string) ([]DiscoveredService, []error) {
+// walkForDockerfiles walks a root path and returns all directories with Dockerfiles
+func walkForDockerfiles(root string, defaultTag string) ([]DiscoveredService, []error) {
 	var services []DiscoveredService
 	var errors []error
 
-	for _, servicesDirPath := range dirs {
-		if _, err := os.Stat(servicesDirPath); os.IsNotExist(err) {
-			errors = append(errors, fmt.Errorf("services directory %s does not exist", servicesDirPath))
-			continue
-		}
-
-		err := filepath.Walk(servicesDirPath, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				errors = append(errors, err)
-				return nil
-			}
-
-			if info.IsDir() {
-				isExcluded := isExcludedDirectory(info.Name())
-				// Never exclude the root directory being walked
-				if path == servicesDirPath {
-					isExcluded = false
-				}
-				// Skip excluded directories
-				if isExcluded {
-					return filepath.SkipDir
-				}
-			}
-
-			// Find Dockerfile (must be a file)
-			if !info.IsDir() && info.Name() == "Dockerfile" {
-				servicePath := filepath.Dir(path)
-				serviceName := filepath.Base(servicePath)
-
-				imageName := NormalizeImageName(serviceName)
-				if err := ValidateImageName(imageName); err != nil {
-					errors = append(errors, fmt.Errorf("service %s: %w", servicePath, err))
-					return nil
-				}
-
-				discovered := DiscoveredService{
-					Path:      servicePath,
-					Name:      serviceName,
-					ImageName: imageName,
-					Tag:       defaultTag,
-				}
-				services = append(services, discovered)
-			}
-
-			return nil
-		})
-
-		if err != nil {
-			errors = append(errors, fmt.Errorf("error walking services directory %s: %w", servicesDirPath, err))
-		}
-	}
-
-	return services, errors
-}
-
-// autoDiscoverServices performs auto-discovery in project root
-func autoDiscoverServices(defaultTag string) ([]DiscoveredService, []error) {
-	var services []DiscoveredService
-	var errors []error
-
-	projectRoot := "."
-	err := filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			errors = append(errors, err)
 			return nil
@@ -219,7 +158,7 @@ func autoDiscoverServices(defaultTag string) ([]DiscoveredService, []error) {
 		if info.IsDir() {
 			isExcluded := isExcludedDirectory(info.Name())
 			// Never exclude the root directory being walked
-			if path == projectRoot {
+			if path == root {
 				isExcluded = false
 			}
 			// Skip excluded directories
@@ -252,10 +191,34 @@ func autoDiscoverServices(defaultTag string) ([]DiscoveredService, []error) {
 	})
 
 	if err != nil {
-		errors = append(errors, fmt.Errorf("error during auto-discovery in project root: %w", err))
+		errors = append(errors, fmt.Errorf("error walking %s: %w", root, err))
 	}
 
 	return services, errors
+}
+
+// discoverFromDirectories discovers services in specified directories
+func discoverFromDirectories(dirs []string, defaultTag string) ([]DiscoveredService, []error) {
+	var services []DiscoveredService
+	var errors []error
+
+	for _, servicesDirPath := range dirs {
+		if _, err := os.Stat(servicesDirPath); os.IsNotExist(err) {
+			errors = append(errors, fmt.Errorf("services directory %s does not exist", servicesDirPath))
+			continue
+		}
+
+		svcs, errs := walkForDockerfiles(servicesDirPath, defaultTag)
+		services = append(services, svcs...)
+		errors = append(errors, errs...)
+	}
+
+	return services, errors
+}
+
+// autoDiscoverServices performs auto-discovery in project root
+func autoDiscoverServices(defaultTag string) ([]DiscoveredService, []error) {
+	return walkForDockerfiles(".", defaultTag)
 }
 
 // discoverFromInputFile discovers services listed in an input file with enhanced logging

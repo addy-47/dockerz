@@ -1,0 +1,167 @@
+name: Build and Release Dockerz
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build Linux amd64 binary
+        run: |
+          go build -o dockerz -v ./cmd/dockerz
+          ./dockerz --version
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build .deb package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PKG="dockerz_${VERSION}_amd64"
+          mkdir -p "${PKG}/DEBIAN"
+          mkdir -p "${PKG}/usr/bin"
+          mkdir -p "${PKG}/usr/share/doc/dockerz"
+
+          # Copy binary
+          cp dockerz "${PKG}/usr/bin/"
+
+          # Generate changelog from git
+          git log --oneline --no-decorate -20 > "${PKG}/usr/share/doc/dockerz/changelog"
+          gzip -9n "${PKG}/usr/share/doc/dockerz/changelog"
+
+          # Control file
+          cat > "${PKG}/DEBIAN/control" << CONTROLEOF
+          Package: dockerz
+          Version: ${VERSION}
+          Architecture: amd64
+          Maintainer: Adhbhut Gupta <adhbutg@gmail.com>
+          Priority: optional
+          Section: devel
+          Homepage: https://github.com/addy-47/dockerz
+          Description: Docker orchestration tool for smart, parallel builds
+           dockerz is a high-performance CLI tool for building and pushing
+           multiple Docker images in parallel with intelligent change
+           detection, multi-level caching, and smart build orchestration.
+          CONTROLEOF
+
+          # Build the .deb
+          dpkg-deb --build "${PKG}"
+          DEB_FILE="${PKG}.deb"
+          echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
+          ls -la "$DEB_FILE"
+          dpkg-deb --info "$DEB_FILE" | head -10
+
+      - name: Run GoReleaser (cross-platform builds + GitHub Release)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload .deb to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.DEB_FILE }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Import GPG Key
+        run: |
+          echo "${{ secrets.APT_GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys --keyid-format LONG 'dockerz@addy-47.github.io'
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update APT Repository on gh-pages
+        env:
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Create APT repo structure
+          mkdir -p gh-pages-repo/apt/pool/main/dockerz
+          mkdir -p gh-pages-repo/apt/dists/stable/main/binary-amd64
+
+          # Copy the new .deb
+          cp "${{ env.DEB_FILE }}" "gh-pages-repo/apt/pool/main/dockerz/"
+
+          # Copy install scripts from repo (these live in master branch)
+          if [ -f scripts/install.sh ]; then
+            cp scripts/install.sh gh-pages-repo/
+          fi
+          if [ -f scripts/uninstall.sh ]; then
+            cp scripts/uninstall.sh gh-pages-repo/
+          fi
+          if [ -d scripts/release ]; then
+            cp -r scripts/release/* gh-pages-repo/ 2>/dev/null || true
+          fi
+
+          # Export public GPG key for APT verification
+          gpg --batch --yes --output gh-pages-repo/public.gpg --armor --export 'dockerz@addy-47.github.io'
+
+          # Generate Packages index
+          cd gh-pages-repo/apt
+          dpkg-scanpackages --multiversion pool/main /dev/null > dists/stable/main/binary-amd64/Packages
+          gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
+
+          # Generate Release file
+          cd dists/stable
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin="Dockerz" \
+            -o APT::FTPArchive::Release::Label="Dockerz" \
+            -o APT::FTPArchive::Release::Suite="stable" \
+            -o APT::FTPArchive::Release::Codename="stable" \
+            -o APT::FTPArchive::Release::Architectures="amd64" \
+            -o APT::FTPArchive::Release::Components="main" \
+            release . > Release
+
+          # Sign Release file with GPG
+          PASSPHRASE_FILE=$(mktemp)
+          echo "$APT_GPG_PASSPHRASE" > "$PASSPHRASE_FILE"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-file "$PASSPHRASE_FILE" \
+            --clearsign -o InRelease Release
+          gpg --batch --yes --pinentry-mode loopback --passphrase-file "$PASSPHRASE_FILE" \
+            -abs -o Release.gpg Release
+          rm -f "$PASSPHRASE_FILE"
+
+      - name: Commit and push to gh-pages
+        run: |
+          cd gh-pages-repo
+          git config user.name "GitHub Actions Bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Publish Dockerz v${{ env.VERSION }} to APT repo"
+            git push origin gh-pages
+          fi

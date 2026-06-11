@@ -3,10 +3,73 @@ package config
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
+
+// defaultThresholds returns platform-aware resource monitoring thresholds.
+// Containers/VMs get more conservative thresholds; bare metal gets higher ones.
+func defaultThresholds() (cpu, mem, disk float64) {
+	// Defaults for bare metal / developer machines
+	cpuDefault := 80.0
+	memDefault := 85.0
+	diskDefault := 90.0
+
+	// Detect containerized environments
+	if isRunningInContainer() {
+		// More conservative thresholds for resource-constrained environments
+		cpuDefault = 65.0
+		memDefault = 70.0
+		diskDefault = 75.0
+	}
+	// Check for WSL (Windows Subsystem for Linux) - moderate thresholds
+	if runtime.GOOS == "linux" {
+		if data, err := os.ReadFile("/proc/version"); err == nil {
+			if strings.Contains(strings.ToLower(string(data)), "microsoft") || 
+			   strings.Contains(strings.ToLower(string(data)), "wsl") {
+				cpuDefault = 70.0
+				memDefault = 75.0
+				diskDefault = 80.0
+			}
+		}
+	}
+
+	return cpuDefault, memDefault, diskDefault
+}
+
+// isRunningInContainer checks if the process is running inside a container
+func isRunningInContainer() bool {
+	// Check for Docker-specific file at root
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+
+	// Check Kubernetes environment variable
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		return true
+	}
+
+	// Check cgroup for container indicators
+	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
+		cgroupContent := string(data)
+		if strings.Contains(cgroupContent, "docker") ||
+		   strings.Contains(cgroupContent, "kubepods") ||
+		   strings.Contains(cgroupContent, "containerd") ||
+		   strings.Contains(cgroupContent, "garden") {
+			return true
+		}
+	}
+
+	// Check for /.containerenv (Podman/CRI-O)
+	if _, err := os.Stat("/.containerenv"); err == nil {
+		return true
+	}
+
+	return false
+}
 
 // ValidateTxtFile validates that the file path has a .txt extension
 func ValidateTxtFile(filePath string) error {
@@ -77,20 +140,47 @@ func LoadConfig(configPath string) (*Config, error) {
 		config.MaxProcesses = 4 // Default to 4 parallel processes
 	}
 	
-	// Set defaults for resource-aware scheduling
+	// Set defaults for resource-aware scheduling (platform-aware)
+	cpuDef, memDef, diskDef := defaultThresholds()
 	if config.MaxCPUThreshold == 0 {
-		config.MaxCPUThreshold = 80.0 // Default 80% CPU threshold
+		config.MaxCPUThreshold = cpuDef
 	}
 	if config.MaxMemoryThreshold == 0 {
-		config.MaxMemoryThreshold = 85.0 // Default 85% memory threshold
+		config.MaxMemoryThreshold = memDef
 	}
 	if config.MaxDiskThreshold == 0 {
-		config.MaxDiskThreshold = 90.0 // Default 90% disk threshold
+		config.MaxDiskThreshold = diskDef
 	}
 	
 	// Set default for BuildKit (enabled by default for better performance)
 	if !config.EnableBuildKit {
 		config.EnableBuildKit = true
+	}
+
+	// Set default for push concurrency
+	if config.PushConcurrency == 0 {
+		config.PushConcurrency = 2 // Default to 2 concurrent pushes
+	}
+
+	// Set default for cache type
+	if config.CacheType == "" {
+		config.CacheType = "inline" // Default to BuildKit inline cache
+	}
+
+	// Set defaults for cache TTLs
+	if config.GitCacheTTL == "" {
+		config.GitCacheTTL = "5m" // Default: 5 minutes
+	}
+	if config.CacheTTL == "" {
+		config.CacheTTL = "24h" // Default: 24 hours
+	}
+
+	// Validate cache TTLs can be parsed
+	if _, err := time.ParseDuration(config.GitCacheTTL); err != nil {
+		return nil, fmt.Errorf("invalid git_cache_ttl '%s': %w", config.GitCacheTTL, err)
+	}
+	if _, err := time.ParseDuration(config.CacheTTL); err != nil {
+		return nil, fmt.Errorf("invalid cache_ttl '%s': %w", config.CacheTTL, err)
 	}
 
 	// Ensure smart features are disabled by default for basic builds
@@ -102,6 +192,16 @@ func LoadConfig(configPath string) (*Config, error) {
 	if config.UseGAR {
 		if config.Project == "" || config.GAR == "" || config.Region == "" {
 			return nil, fmt.Errorf("missing required fields for GAR: project, gar, region")
+		}
+	}
+
+	// Validate cache type
+	if config.CacheType != "" {
+		switch config.CacheType {
+		case "none", "inline", "registry":
+			// Valid
+		default:
+			return nil, fmt.Errorf("invalid cache_type '%s': must be one of: none, inline, registry", config.CacheType)
 		}
 	}
 
@@ -159,6 +259,15 @@ global_tag: latest
 # Override with --max-processes flag
 max_processes: 4
 
+# Maximum number of concurrent image pushes to registry
+# Override with --push-concurrency flag
+push_concurrency: 2
+
+# BuildKit cache mode for builds: none, inline, or registry
+# 'inline' embeds cache in the image, 'registry' pushes cache to registry
+# Override with --cache-type flag
+cache_type: inline
+
 # Whether to use Google Artifact Registry for image naming and pushing
 # When true: images use GAR naming (region-docker.pkg.dev/project/gar/service:tag)
 # When false: images use local naming (service:tag)
@@ -195,6 +304,13 @@ cache: false
 # Useful for clean builds or when cache is corrupted
 # Use --force flag to enable
 force: false
+
+# ===== CACHE TTL CONFIGURATION =====
+# How long to cache git operation results (Go duration format)
+git_cache_ttl: 5m
+
+# How long to cache build results before considering them stale (Go duration format)
+cache_ttl: 24h
 
 # ===== CHANGE DETECTION FILES =====
 # File paths for storing lists of changed services (used with git_track)
