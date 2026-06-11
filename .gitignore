@@ -1,2 +1,8 @@
 .gpg*
 .agents*
+dockerz
+dockerz_*
+dist/
+build.log
+built-services.txt
+changed.txt
