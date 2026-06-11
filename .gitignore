@@ -1,0 +1,3 @@
+.agents/*
+# GPG signing keys (do not commit)
+.gpg-*
