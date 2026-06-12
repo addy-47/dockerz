@@ -17,27 +17,27 @@ const (
 
 // SmartConfig represents smart build configuration
 type SmartConfig struct {
-	Enabled         bool          `yaml:"enabled" mapstructure:"enabled"`
-	GitTracking     bool          `yaml:"git_tracking" mapstructure:"git_tracking"`
-	GitTrackDepth   int           `yaml:"git_track_depth" mapstructure:"git_track_depth"`
-	GitCacheTTL     time.Duration `yaml:"git_cache_ttl" mapstructure:"git_cache_ttl"`
-	CacheEnabled    bool          `yaml:"cache_enabled" mapstructure:"cache_enabled"`
-	CacheLevel      cache.CacheLevel `yaml:"cache_level" mapstructure:"cache_level"`
-	CacheTTL        time.Duration `yaml:"cache_ttl" mapstructure:"cache_ttl"`
-	ForceRebuild    bool          `yaml:"force_rebuild" mapstructure:"force_rebuild"`
+	Enabled       bool             `yaml:"enabled" mapstructure:"enabled"`
+	GitTracking   bool             `yaml:"git_tracking" mapstructure:"git_tracking"`
+	GitTrackDepth int              `yaml:"git_track_depth" mapstructure:"git_track_depth"`
+	GitCacheTTL   time.Duration    `yaml:"git_cache_ttl" mapstructure:"git_cache_ttl"`
+	CacheEnabled  bool             `yaml:"cache_enabled" mapstructure:"cache_enabled"`
+	CacheLevel    cache.CacheLevel `yaml:"cache_level" mapstructure:"cache_level"`
+	CacheTTL      time.Duration    `yaml:"cache_ttl" mapstructure:"cache_ttl"`
+	ForceRebuild  bool             `yaml:"force_rebuild" mapstructure:"force_rebuild"`
 }
 
 // ServiceState represents the current state of a service
 type ServiceState struct {
-	ServiceName     string
-	CurrentHash     string
-	LastBuildHash   string
-	ChangedFiles    []string
-	LastBuildTime   time.Time
-	CacheHit        bool
-	GARConfigured   bool
-	GARReachable    bool
-	GARImageExists  bool
+	ServiceName    string
+	CurrentHash    string
+	LastBuildHash  string
+	ChangedFiles   []string
+	LastBuildTime  time.Time
+	CacheHit       bool
+	GARConfigured  bool
+	GARReachable   bool
+	GARImageExists bool
 }
 
 // OrchestrationResult represents the result of smart orchestration

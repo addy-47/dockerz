@@ -53,7 +53,7 @@ func NewLogger(logFilePath string) (*Logger, error) {
 	}
 
 	// Enable all categories by default
-	categories := []Category{CATEGORY_CONFIG, CATEGORY_DISCOVERY, CATEGORY_GIT, 
+	categories := []Category{CATEGORY_CONFIG, CATEGORY_DISCOVERY, CATEGORY_GIT,
 		CATEGORY_CACHE, CATEGORY_SMART, CATEGORY_BUILD, CATEGORY_PERFORMANCE}
 	for _, cat := range categories {
 		logger.enabled[cat] = true
@@ -210,4 +210,20 @@ func (l *Logger) Close() error {
 		return l.logFile.Close()
 	}
 	return nil
+}
+
+// MuteConsole redirects console output to a discard writer.
+// Log messages continue to be written to the file logger.
+// Call UnmuteConsole() to restore console output.
+func (l *Logger) MuteConsole() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.consoleLogger = log.New(io.Discard, "", 0)
+}
+
+// UnmuteConsole restores console output to stdout after MuteConsole().
+func (l *Logger) UnmuteConsole() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.consoleLogger = log.New(os.Stdout, "", 0)
 }

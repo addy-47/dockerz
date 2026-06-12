@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -13,9 +14,11 @@ import (
 	"github.com/addy-47/dockerz/internal/discovery"
 	"github.com/addy-47/dockerz/internal/git"
 	"github.com/addy-47/dockerz/internal/logging"
+	"github.com/addy-47/dockerz/internal/renderer"
 	"github.com/addy-47/dockerz/internal/smart"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -29,11 +32,13 @@ var (
 	project               string
 	region                string
 	gar                   string
+	registryURL           string
 	globalTag             string
 	inputChangedServices  string
 	outputChangedServices string
 	useGAR                bool
 	pushToGAR             bool
+	pushToRegistry        bool
 	servicesDir           string
 	version               bool
 	dryRun                bool
@@ -61,7 +66,7 @@ func PrintDockerzBanner() {
 	green.Println(` \__,_|\___/ \___|_|\_\___|_|  /___|  `)
 	fmt.Println()
 
-	white.Printf(" %s ", color.New(color.BgHiMagenta, color.FgHiWhite).Sprint(" v3.0.0 "))
+	white.Printf(" %s ", color.New(color.BgHiMagenta, color.FgHiWhite).Sprint(" v3.2.0 "))
 	yellow.Println(" The ultimate Docker companion for smart, parallel builds")
 	fmt.Println()
 }
@@ -69,7 +74,7 @@ func PrintDockerzBanner() {
 var rootCmd = &cobra.Command{
 	Use:   "dockerz",
 	Short: "🚀 Dockerz - Supercharge your Docker builds with smart orchestration",
-	Long: `Dockerz (v3.0.0) is a high-performance Docker orchestration tool designed for monorepos and complex CI/CD pipelines.
+	Long: `Dockerz (v3.2.0) is a high-performance Docker orchestration tool designed for monorepos and complex CI/CD pipelines.
 
 It intelligently analyzes your repository using Git tracking, skips unchanged services, 
 and leverages multi-level caching to reduce build times by up to 90%.
@@ -80,7 +85,7 @@ Quick Start:
   3. Build:       dockerz build --smart`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if version {
-			fmt.Println("dockerz version 3.0.0")
+			fmt.Println("dockerz version 3.2.0")
 			return
 		}
 		PrintDockerzBanner()
@@ -161,8 +166,11 @@ Examples:
 			}
 		}
 
-		if cfg.UseGAR {
-			fmt.Printf("✅ GAR configured: %s/%s/%s\n", cfg.Region, cfg.Project, cfg.GAR)
+		if cfg.RegistryURL != "" {
+			fmt.Printf("✅ Registry configured: %s\n", cfg.RegistryURL)
+			if cfg.PushToRegistry {
+				fmt.Printf("✅ Push to registry enabled\n")
+			}
 		}
 
 		if cfg.InputChangedServices != "" {
@@ -235,11 +243,11 @@ Dockerz Build intelligently manages:
   - 🧠 Smart Change Detection: Only rebuild what changed since the last build/commit.
   - 🚄 Parallel Execution: Utilize all CPU cores for simultaneous builds and pushes.
   - 💾 Multi-Level Caching: Layer caching + Local hash caching + Registry existence checks.
-  - ☁️ GAR Integration: First-class support for Google Artifact Registry.
+  - ☁️ Multi-Registry Support: GAR, AWS ECR, Docker Hub, self-hosted — any OCI registry.
 
 Examples:
   dockerz build --smart --git-track --cache
-  dockerz build --smart --push-to-gar --global-tag v1.0.1
+  dockerz build --registry-url my-registry.io/project --push-to-registry --global-tag v1.0.1
   dockerz build --services-dir=api,worker --max-processes=4`,
 	Run: func(cmd *cobra.Command, args []string) {
 
@@ -250,7 +258,18 @@ Examples:
 		}
 		defer logger.Close()
 
-		// Print startup banner with configuration
+		// In TTY mode, mute console logging from the very start so the
+		// terminal stays clean for progress bars. All structured log
+		// messages still go to build.log, and standard log.Printf is
+		// discarded (restored when progress bars finish).
+		isTTY := term.IsTerminal(int(os.Stderr.Fd()))
+		progressRendererMode := isTTY && !dryRun
+		if progressRendererMode {
+			logger.MuteConsole()
+			log.SetOutput(io.Discard)
+		}
+
+		// Print startup banner with configuration (goes to build.log only in TTY mode)
 		logger.PrintBanner("DOCKERZ BUILD START", []string{
 			fmt.Sprintf("Config: %s", configPath),
 			fmt.Sprintf("Smart Features: %v", smartEnabled),
@@ -267,10 +286,10 @@ Examples:
 			log.Fatalf("Failed to load config: %v", err)
 		}
 
-		// Validate GAR settings if use_gar is True
-		if cfg.UseGAR {
-			if err := builder.CheckGARAuth(); err != nil {
-				log.Fatalf("GAR authentication not set up. Run 'gcloud auth configure-docker %s-docker.pkg.dev'.", cfg.Region)
+		// Validate registry authentication if a registry is configured
+		if cfg.RegistryURL != "" {
+			if err := builder.CheckRegistryAuth(cfg); err != nil {
+				log.Fatalf("Registry authentication failed: %v", err)
 			}
 		}
 
@@ -299,6 +318,10 @@ Examples:
 		if cmd.Flags().Changed("smart") {
 			cfg.Smart = smartEnabled
 		}
+		if cmd.Flags().Changed("registry-url") {
+			cfg.RegistryURL = registryURL
+		}
+		// Deprecated GAR flags — map to RegistryURL if set
 		if cmd.Flags().Changed("project") {
 			cfg.Project = project
 		}
@@ -308,14 +331,16 @@ Examples:
 		if cmd.Flags().Changed("gar") {
 			cfg.GAR = gar
 		}
-		if cmd.Flags().Changed("global-tag") {
-			cfg.GlobalTag = globalTag
-		}
 		if cmd.Flags().Changed("use-gar") {
 			cfg.UseGAR = useGAR
+			// Auto-construct registry_url from deprecated GAR fields if not already set
+			if cfg.RegistryURL == "" && cfg.Project != "" && cfg.Region != "" && cfg.GAR != "" {
+				cfg.RegistryURL = fmt.Sprintf("%s-docker.pkg.dev/%s/%s", cfg.Region, cfg.Project, cfg.GAR)
+			}
 		}
-		if cmd.Flags().Changed("push-to-gar") {
+		if cmd.Flags().Changed("push-to-gar") || cmd.Flags().Changed("push-to-registry") {
 			cfg.PushToGAR = pushToGAR
+			cfg.PushToRegistry = pushToGAR || pushToRegistry
 		}
 		if cmd.Flags().Changed("push-concurrency") {
 			cfg.PushConcurrency = pushConcurrency
@@ -549,9 +574,51 @@ Examples:
 			maxProcs = cfg.MaxProcesses
 		}
 
+		// Create progress renderer for live terminal output (skipped for non-TTY and dry-run)
+		var progressRenderer *renderer.ProgressRenderer
+		if progressRendererMode {
+			// Build a clean status header line with key flags
+			headerParts := []string{fmt.Sprintf("dockerz  %d services", len(servicesToBuild))}
+			if cfg.Force {
+				headerParts = append(headerParts, "force")
+			}
+			if cfg.Smart {
+				headerParts = append(headerParts, "smart")
+			}
+			if cfg.GitTrack {
+				headerParts = append(headerParts, "git-track")
+			}
+			if cfg.Cache {
+				headerParts = append(headerParts, "cache")
+			}
+			if cfg.RegistryURL != "" && cfg.PushToRegistry {
+				headerParts = append(headerParts, "push")
+			}
+			headerParts = append(headerParts, fmt.Sprintf("max %d", maxProcs))
+			headerText := strings.Join(headerParts, "  |  ")
+
+			progressRenderer = renderer.NewProgressRenderer(logger)
+			// Extract service names for the progress renderer
+			serviceNames := make([]string, len(servicesToBuild))
+			for i, svc := range servicesToBuild {
+				serviceNames[i] = svc.Name
+			}
+			progressRenderer.Start(serviceNames, maxProcs, headerText)
+		}
+
 		startBuildTime := time.Now()
-		_, summary := builder.BuildImages(cfg, filteredResult, maxProcs)
+		_, summary := builder.BuildImages(cfg, filteredResult, maxProcs, progressRenderer)
 		buildDuration := time.Since(startBuildTime)
+
+		// Stop the progress renderer (flushes bars, prints summary)
+		if progressRenderer != nil {
+			progressRenderer.Stop()
+			// Mute the logger for the remaining structured summary
+			// to avoid duplicating the visual summary on console.
+			// The structured summary still goes to build.log.
+			logger.MuteConsole()
+			defer logger.UnmuteConsole()
+		}
 
 		// Log build summary with metrics
 		logger.PrintSummary(map[string]interface{}{
@@ -597,9 +664,10 @@ func init() {
 
 	buildCmd.Flags().StringVarP(&configPath, "config", "c", "build.yaml", "Path to the build.yaml configuration file (default: build.yaml)")
 	buildCmd.Flags().IntVarP(&maxProcesses, "max-processes", "m", 0, "Maximum number of parallel build processes (0 = use system default; overrides config file)")
-	buildCmd.Flags().StringVar(&project, "project", "", "Google Cloud Platform project ID for GAR integration (overrides config file)")
-	buildCmd.Flags().StringVar(&region, "region", "", "GCP region for GAR (e.g., us-central1, europe-west1; overrides config file)")
-	buildCmd.Flags().StringVar(&gar, "gar", "", "Name of the Google Artifact Registry repository (overrides config file)")
+	buildCmd.Flags().StringVar(&registryURL, "registry-url", "", "OCI-compatible registry URL (e.g., us-central1-docker.pkg.dev/my-project/my-repo, 123456.dkr.ecr.us-east-1.amazonaws.com/my-repo). Leave empty for local-only builds.")
+	buildCmd.Flags().StringVar(&project, "project", "", "Google Cloud Platform project ID (used with --gar and --region for GAR; alternative to --registry-url)")
+	buildCmd.Flags().StringVar(&region, "region", "", "GCP region for GAR (e.g., us-central1, europe-west1; alternative to --registry-url)")
+	buildCmd.Flags().StringVar(&gar, "gar", "", "Name of the Google Artifact Registry repository (alternative to --registry-url)")
 	buildCmd.Flags().StringVar(&globalTag, "global-tag", "", "Global Docker tag to apply to all built images (overrides config file and git commit ID)")
 	buildCmd.Flags().StringVar(&servicesDir, "services-dir", "", "Comma-separated list of directories to scan for service definitions (overrides config file)")
 	buildCmd.Flags().StringVar(&inputChangedServices, "input-changed-services", "", "Path to a file containing a newline-separated list of service names to build selectively")
@@ -611,8 +679,9 @@ func init() {
 	buildCmd.Flags().BoolVar(&cacheEnabled, "cache", false, "Enable multi-level build caching (layer, local hash, and registry cache)")
 	buildCmd.Flags().BoolVar(&forceRebuild, "force", false, "Force rebuild of all services, ignoring cache and change detection")
 	buildCmd.Flags().BoolVar(&smartEnabled, "smart", false, "Enable smart build orchestration with automatic dependency analysis and optimization")
-	buildCmd.Flags().BoolVar(&useGAR, "use-gar", false, "Use Google Artifact Registry naming convention for image tags (requires GAR authentication)")
-	buildCmd.Flags().BoolVar(&pushToGAR, "push-to-gar", false, "Automatically push built images to Google Artifact Registry after successful builds")
+	buildCmd.Flags().BoolVar(&useGAR, "use-gar", false, "Use Google Artifact Registry naming convention for image tags (alternative to --registry-url)")
+	buildCmd.Flags().BoolVar(&pushToGAR, "push-to-gar", false, "Push built images to Google Artifact Registry (alternative to --push-to-registry)")
+	buildCmd.Flags().BoolVar(&pushToRegistry, "push-to-registry", false, "Automatically push built images to the configured registry after successful builds")
 
 	// Phase 1 new flags
 	buildCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview what would be built without executing Docker builds")

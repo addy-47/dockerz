@@ -32,6 +32,9 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Run go vet
+        run: go vet ./...
+
       - name: Run GoReleaser (cross-platform builds + GitHub Release)
         uses: goreleaser/goreleaser-action@v6
         with:

@@ -4,25 +4,33 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/addy-47/dockerz/internal/config"
 	"github.com/addy-47/dockerz/internal/discovery"
+	"github.com/addy-47/dockerz/internal/renderer"
 )
 
 // ResourceAwareConfig holds configuration for resource-aware scheduling
 type ResourceAwareConfig struct {
 	EnableResourceMonitoring bool
-	MaxCPUThreshold         float64
-	MaxMemoryThreshold      float64
-	MaxDiskThreshold        float64
-	MonitorInterval         time.Duration
+	MaxCPUThreshold          float64
+	MaxMemoryThreshold       float64
+	MaxDiskThreshold         float64
+	MonitorInterval          time.Duration
 }
 
 // BuildImages builds Docker images for discovered services in parallel
-func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult, maxProcesses int) ([]BuildResult, Summary) {
+func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult, maxProcesses int, reporter ...*renderer.ProgressRenderer) ([]BuildResult, Summary) {
 	startTime := time.Now()
+
+	// Get the progress reporter if provided
+	var progressReporter *renderer.ProgressRenderer
+	if len(reporter) > 0 {
+		progressReporter = reporter[0]
+	}
 
 	// Create build.log file
 	logFile, err := os.OpenFile("build.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -40,10 +48,10 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 	// Resource-aware scheduling configuration from config
 	resourceConfig := ResourceAwareConfig{
 		EnableResourceMonitoring: cfg.EnableResourceMonitoring,
-		MaxCPUThreshold:         cfg.MaxCPUThreshold,
-		MaxMemoryThreshold:      cfg.MaxMemoryThreshold,
-		MaxDiskThreshold:        cfg.MaxDiskThreshold,
-		MonitorInterval:         2 * time.Second,
+		MaxCPUThreshold:          cfg.MaxCPUThreshold,
+		MaxMemoryThreshold:       cfg.MaxMemoryThreshold,
+		MaxDiskThreshold:         cfg.MaxDiskThreshold,
+		MonitorInterval:          2 * time.Second,
 	}
 
 	// Initialize resource monitor
@@ -58,7 +66,7 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 		resourceMonitor = NewResourceMonitor(monitorConfig)
 		resourceMonitor.Start()
 		defer resourceMonitor.Stop()
-		
+
 		log.Printf("Resource-aware scheduling enabled: CPU<%.0f%%, Memory<%.0f%%, Disk<%.0f%%",
 			resourceConfig.MaxCPUThreshold, resourceConfig.MaxMemoryThreshold, resourceConfig.MaxDiskThreshold)
 		log.Printf("System info: %s", GetSystemInfo())
@@ -68,7 +76,7 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 	var pushMgr *PushManager
 	var mapMu sync.Mutex
 	pushResultsMap := make(map[string]chan PushResult)
-	if cfg.PushToGAR {
+	if cfg.RegistryURL != "" && cfg.PushToRegistry {
 		pushConcurrency := cfg.PushConcurrency
 		if pushConcurrency == 0 {
 			pushConcurrency = 2
@@ -87,6 +95,7 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 			Tag:         service.Tag,
 			Config:      cfg,
 			NeedsBuild:  service.NeedsBuild,
+			Quiet:       progressReporter != nil,
 		}
 		tasks = append(tasks, task)
 	}
@@ -130,21 +139,33 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 				}
 
 				sem <- struct{}{} // Acquire semaphore
-				
-				log.Printf("Worker %d: Starting build for %s", workerID, task.ServicePath)
+
+				// Report build start to progress renderer
+				if progressReporter != nil {
+					progressReporter.ServiceStarted(task.ImageName)
+				}
+
+				if !task.Quiet {
+					log.Printf("Worker %d: Starting build for %s", workerID, task.ServicePath)
+				}
 				result := BuildDockerImage(task)
-				
+
 				// Queue push if build was successful and push is requested
 				if result.Status == "success" && result.PushStatus == "queued" && pushMgr != nil {
+					if progressReporter != nil {
+						progressReporter.ServicePushStarted(task.ImageName)
+					}
 					mapMu.Lock()
 					pushResultsMap[result.Image] = pushMgr.QueuePush(result.Image, task.ServicePath)
 					mapMu.Unlock()
 				}
-				
+
 				<-sem // Release semaphore
-				
+
 				resultsChan <- result
-				log.Printf("Worker %d: Completed build for %s (status: %s)", workerID, task.ServicePath, result.Status)
+				if !task.Quiet {
+					log.Printf("Worker %d: Completed build for %s (status: %s)", workerID, task.ServicePath, result.Status)
+				}
 			}
 		}(i)
 	}
@@ -173,12 +194,41 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 	if pushMgr != nil {
 		log.Printf("Waiting for all pushes to complete...")
 		pushMgr.Stop() // This waits for all queued pushes to finish
-		
+
 		for i, result := range results {
 			if resChan, exists := pushResultsMap[result.Image]; exists {
 				pushRes := <-resChan
 				results[i].PushStatus = pushRes.Status
 				results[i].PushOutput = pushRes.Output
+			}
+		}
+	}
+
+	// Report completion/failure to progress renderer (after pushes resolved)
+	if progressReporter != nil {
+		for _, result := range results {
+			// Use short image name for progress events, falling back to path if empty
+			svcName := result.ImageName
+			if svcName == "" {
+				// Extract short name from path as fallback
+				if idx := strings.LastIndex(result.Service, "/"); idx >= 0 {
+					svcName = result.Service[idx+1:]
+				} else {
+					svcName = result.Service
+				}
+			}
+			buildTime := result.EndTime.Sub(result.StartTime)
+			switch result.Status {
+			case "success":
+				progressReporter.ServiceDone(svcName, result.Image, buildTime, 0)
+			case "failed":
+				errMsg := result.BuildOutput
+				if errMsg == "" {
+					errMsg = "build failed"
+				}
+				progressReporter.ServiceFailed(svcName, errMsg)
+			default:
+				// skipped — no report needed
 			}
 		}
 	}
@@ -208,27 +258,9 @@ func BuildImages(cfg *config.Config, discoveryResult *discovery.DiscoveryResult,
 		Duration:         totalDuration,
 	}
 
-	// Print summary
-	log.Printf("\nBuild Summary:")
-	log.Printf("Total services: %d", summary.TotalServices)
-	log.Printf("Successful builds: %d", summary.SuccessfulBuilds)
-	log.Printf("Failed builds: %d", summary.FailedBuilds)
-	if summary.FailedBuilds > 0 {
-		log.Printf("Failed builds:")
-		for _, result := range results {
-			if result.Status == "failed" {
-				log.Printf("- %s: %s", result.Service, result.Image)
-			}
-		}
-	}
-	if summary.FailedPushes > 0 {
-		log.Printf("Failed pushes:")
-		for _, result := range results {
-			if result.PushStatus == "failed" {
-				log.Printf("- %s: %s", result.Service, result.Image)
-			}
-		}
-	}
+	// Console summary is provided by main.go's structured logger
+	// or by the progress renderer's visual summary in TTY mode.
+	// build.log gets its own summary below.
 
 	// Write final summary to log file
 	if logFile != nil {

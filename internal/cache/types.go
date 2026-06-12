@@ -16,11 +16,11 @@ const (
 
 // CacheEntry represents a cached build result
 type CacheEntry struct {
-	ServiceName string    `json:"service_name"`
-	ImageHash   string    `json:"image_hash"`
-	LayerHash   string    `json:"layer_hash,omitempty"`
-	RegistryTag string    `json:"registry_tag,omitempty"`
-	Timestamp   time.Time `json:"timestamp"`
+	ServiceName string        `json:"service_name"`
+	ImageHash   string        `json:"image_hash"`
+	LayerHash   string        `json:"layer_hash,omitempty"`
+	RegistryTag string        `json:"registry_tag,omitempty"`
+	Timestamp   time.Time     `json:"timestamp"`
 	TTL         time.Duration `json:"ttl"`
 }
 

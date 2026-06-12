@@ -18,11 +18,11 @@ type ResourceMonitor struct {
 	maxMemoryThreshold float64
 	maxDiskThreshold   float64
 	checkInterval      time.Duration
-	stopChan          chan struct{}
-	mu                sync.Mutex
-	currentLoad       float64
-	currentMemory     float64
-	currentDisk       float64
+	stopChan           chan struct{}
+	mu                 sync.Mutex
+	currentLoad        float64
+	currentMemory      float64
+	currentDisk        float64
 }
 
 // NewResourceMonitor creates a new resource monitor
@@ -52,10 +52,10 @@ func NewResourceMonitor(config ResourceMonitorConfig) *ResourceMonitor {
 		maxMemoryThreshold: config.MaxMemoryThreshold,
 		maxDiskThreshold:   config.MaxDiskThreshold,
 		checkInterval:      config.CheckInterval,
-		stopChan:          make(chan struct{}),
-		currentLoad:       0,
-		currentMemory:     0,
-		currentDisk:       0,
+		stopChan:           make(chan struct{}),
+		currentLoad:        0,
+		currentMemory:      0,
+		currentDisk:        0,
 	}
 }
 
@@ -106,14 +106,14 @@ func (rm *ResourceMonitor) updateResourceMetrics() {
 
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
-	
+
 	if len(cpuPercent) > 0 {
 		rm.currentLoad = cpuPercent[0]
 	}
 	rm.currentMemory = memInfo.UsedPercent
 	rm.currentDisk = diskInfo.UsedPercent
 
-	log.Printf("Resource Monitor: CPU=%.1f%%, Memory=%.1f%%, Disk=%.1f%%", 
+	log.Printf("Resource Monitor: CPU=%.1f%%, Memory=%.1f%%, Disk=%.1f%%",
 		rm.currentLoad, rm.currentMemory, rm.currentDisk)
 }
 

@@ -115,7 +115,7 @@ func (gc *GitCache) CacheDiff(servicePath string, depth int, files []string, ttl
 func (gc *GitCache) ClearCache() {
 	gc.mu.Lock()
 	defer gc.mu.Unlock()
-	
+
 	gc.statusCache = make(map[string]GitStatusCacheEntry)
 	gc.diffCache = make(map[string]GitDiffCacheEntry)
 

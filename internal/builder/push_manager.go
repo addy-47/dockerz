@@ -1,10 +1,13 @@
 package builder
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,14 +17,14 @@ import (
 
 // PushManager handles throttled and retried Docker image pushes
 type PushManager struct {
-	config         *config.Config
-	maxConcurrent  int
-	semaphore      chan struct{}
-	retryDelay     time.Duration
-	maxRetries     int
-	pushQueue      chan PushTask
-	wg             sync.WaitGroup
-	logger         *logging.Logger
+	config        *config.Config
+	maxConcurrent int
+	semaphore     chan struct{}
+	retryDelay    time.Duration
+	maxRetries    int
+	pushQueue     chan PushTask
+	wg            sync.WaitGroup
+	logger        *logging.Logger
 }
 
 // PushTask represents a single push operation
@@ -80,11 +83,11 @@ func (pm *PushManager) worker(workerID int) {
 
 	for task := range pm.pushQueue {
 		pm.semaphore <- struct{}{} // Acquire semaphore
-		
+
 		result := pm.pushWithRetry(task)
-		
+
 		<-pm.semaphore // Release semaphore
-		
+
 		// Send result back
 		if task.ResultChan != nil {
 			task.ResultChan <- result
@@ -99,18 +102,26 @@ func (pm *PushManager) pushWithRetry(task PushTask) PushResult {
 
 	for attempt := 1; attempt <= pm.maxRetries; attempt++ {
 		if pm.logger != nil {
-			pm.logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Attempt %d/%d: Pushing image to GAR: %s", attempt, pm.maxRetries, task.ImageName))
+			pm.logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Attempt %d/%d: Pushing image: %s", attempt, pm.maxRetries, task.ImageName))
 		} else {
-			log.Printf("Attempt %d/%d: Pushing image to GAR: %s", attempt, pm.maxRetries, task.ImageName)
+			log.Printf("Attempt %d/%d: Pushing image: %s", attempt, pm.maxRetries, task.ImageName)
 		}
 
 		pushCmd := exec.Command("docker", "push", task.ImageName)
-		pushCmd.Stdout = os.Stdout
-		pushCmd.Stderr = os.Stderr
+
+		// Capture push output: tee to terminal AND buffer (for build.log on failure)
+		var pushBuf bytes.Buffer
+		pushCmd.Stdout = io.MultiWriter(os.Stdout, &pushBuf)
+		pushCmd.Stderr = io.MultiWriter(os.Stderr, &pushBuf)
 
 		if err := pushCmd.Run(); err != nil {
 			result.Status = "failed"
-			result.Output = err.Error()
+			// Capture actual Docker stderr/stdout output (not just Go exit error)
+			if pushBuf.Len() > 0 {
+				result.Output = strings.TrimSpace(pushBuf.String())
+			} else {
+				result.Output = err.Error()
+			}
 			result.RetryCount = attempt
 
 			if attempt < pm.maxRetries {
@@ -134,7 +145,7 @@ func (pm *PushManager) pushWithRetry(task PushTask) PushResult {
 		// Success
 		result.Status = "success"
 		result.RetryCount = attempt
-		
+
 		if pm.logger != nil {
 			pm.logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Successfully pushed %s (attempt %d)", task.ImageName, attempt))
 		} else {
@@ -149,13 +160,13 @@ func (pm *PushManager) pushWithRetry(task PushTask) PushResult {
 // QueuePush adds a push task to the queue
 func (pm *PushManager) QueuePush(imageName, servicePath string) chan PushResult {
 	resultChan := make(chan PushResult, 1)
-	
+
 	pm.pushQueue <- PushTask{
 		ImageName:   imageName,
 		ServicePath: servicePath,
 		ResultChan:  resultChan,
 	}
-	
+
 	return resultChan
 }
 

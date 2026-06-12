@@ -1,0 +1,11 @@
+max_processes: 2
+global_tag: sandbox
+push_to_registry: false
+
+services:
+  - name: services/api
+    image_name: api
+  - name: services/worker
+    image_name: worker
+  - name: services/frontend
+    image_name: frontend

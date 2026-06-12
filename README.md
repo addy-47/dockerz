@@ -1,4 +1,4 @@
-# Dockerz v3.0.0 - The Ultimate Docker Companion Tool
+# Dockerz v3.2.0 - The Ultimate Docker Companion Tool
 
 ```
      _            _                    
@@ -22,13 +22,26 @@ Dockerz is a powerful CLI tool for building and pushing multiple Docker images i
 - **Flexible Configuration**: YAML-based configuration with comprehensive CLI flag overrides
 - **Cross-Platform**: Works on Linux, macOS, and Windows (WSL2)
 
-### 🧠 Smart Features (v3.0.0)
+### 🧠 Smart Features (v3.1.0)
 - **Registry-First Skipping**: Check remote registry (GAR) before building. Skip if image exists.
 - **Git Change Detection**: Optimized preloaded git diff analysis for instant results.
 - **Multi-Level Caching**: Layer, local hash, and registry-based caching.
 - **Parallel Execution**: simultaneous builds and background registry pushes.
 - **Smart Build Orchestration**: Intelligently skip unchanged services, only rebuild what needs rebuilding.
+- **Dry-Run Mode**: Preview builds without executing Docker (`--dry-run`).
+- **Configurable Push Concurrency**: Control concurrent image pushes (`--push-concurrency`).
+- **BuildKit Cache Modes**: `none`, `inline`, or `registry` cache types (`--cache-type`).
+- **Config Validation**: Validate `build.yaml` structure and field correctness (`dockerz config validate`).
+- **Shell Completions**: Generate bash/zsh/fish completions (`dockerz completion <shell>`).
+- **Configurable Cache TTLs**: Per-cache expiry for git and build caches (`git_cache_ttl`, `cache_ttl`).
+- **Platform-Aware Thresholds**: Resource limits adapt to container vs bare-metal environments.
+- **APT Repository**: Install via GPG-signed apt repo on GitHub Pages.
 - **CI/CD Integration**: Optimized for Cloud Build and GitHub Actions with minimal configuration.
+
+### 🆕 v3.2.0 New Features
+- **Progress Bar Terminal UI**: Live multi-progress bars using mpb — clean, no-borders, solid-fill style with per-service status icons (queued/building/done/failed) and elapsed time. Automatically falls back to traditional logging on non-TTY.
+- **Generic Multi-Registry Support**: Unified `--registry-url` and `--push-to-registry` for any OCI-compatible registry (GAR, AWS ECR, Azure ACR, Docker Hub, self-hosted). Auto-detects registry type from URL patterns.
+- **Build Log Stderr Capture**: `build.log` now captures both stdout and stderr from build commands via `io.MultiWriter` + `bytes.Buffer`.
 
 ### 🏗️ Modular Architecture
 Dockerz is built with a modular internal structure:
@@ -37,6 +50,8 @@ Dockerz is built with a modular internal structure:
 - **Config Module**: Configuration management and validation
 - **Discovery Module**: Intelligent service discovery and scanning
 - **Git Module**: Git-based change detection and tracking
+- **Logging Module**: Comprehensive structured logging
+- **Renderer Module**: Terminal progress bar rendering (mpb-based)
 - **Smart Module**: Advanced orchestration and decision making
 
 ## Installation
@@ -104,12 +119,13 @@ dockerz build [flags]
 - `--max-processes, -m`: Maximum parallel build processes
 - `--version, -v`: Print version information
 
-**GAR Integration:**
-- `--project`: GCP project ID for GAR integration
-- `--region`: GCP region for GAR (e.g., us-central1, europe-west1)
-- `--gar`: Name of the Google Artifact Registry repository
-- `--use-gar`: Use Google Artifact Registry naming convention
-- `--push-to-gar`: Automatically push built images to GAR
+**Registry Integration:**
+- `--registry-url`: OCI-compatible registry URL (GAR/ECR/ACR/generic)
+- `--push-to-registry`: Push built images to registry after building
+- `--project`: GCP project ID for GAR integration (legacy)
+- `--region`: GCP region for GAR (legacy)
+- `--gar`: Name of the Google Artifact Registry repository (legacy)
+- `--push-to-gar`: Push to GAR (legacy, use --push-to-registry)
 
 **Smart Features:**
 - `--smart`: Enable smart build orchestration
@@ -117,11 +133,20 @@ dockerz build [flags]
 - `--depth`: Git tracking depth (0 for full history, default 2)
 - `--cache`: Enable multi-level build caching
 - `--force`: Force rebuild of all services
+- `--dry-run`: Preview builds without executing Docker
+- `--push-concurrency`: Max concurrent image pushes (default 2)
+- `--cache-type`: BuildKit cache mode (none, inline, registry)
+- `--git-cache-ttl`: Git cache TTL duration (default 5m)
+- `--cache-ttl`: Build cache TTL duration (default 24h)
 
 **CI/CD Integration:**
 - `--services-dir`: Comma-separated list of directories to scan
 - `--input-changed-services`: Path to input file with changed services
 - `--output-changed-services`: Path to output file for detected changes
+
+**Configuration:**
+- `dockerz config validate`: Validate build.yaml configuration
+- `dockerz completion <bash|zsh|fish>`: Generate shell completions
 
 **Global Configuration:**
 - `--global-tag`: Global Docker tag for all built images
@@ -218,14 +243,24 @@ dockerz init
 ### Example `build.yaml`
 
 ```yaml
-# Dockerz v2.75 Configuration
+# Dockerz v3.2.0 Configuration
 # This file configures how Dockerz builds and manages your microservices.
 
 # ===== DIRECTORY CONFIGURATION =====
 # Directories to scan for services (leave empty for auto-discovery)
 services_dir: []
 
-# ===== GOOGLE CLOUD CONFIGURATION =====
+# ===== REGISTRY CONFIGURATION =====
+# Use registry_url for any OCI-compatible registry:
+#   GAR:           us-central1-docker.pkg.dev/my-project/my-repo
+#   AWS ECR:       123456.dkr.ecr.us-east-1.amazonaws.com/my-repo
+#   Docker Hub:    docker.io/myuser
+#   Self-hosted:   registry.example.com/my-project
+# Leave empty for local-only builds.
+registry_url: ""
+push_to_registry: false
+
+# Legacy GAR fields (used if registry_url is empty):
 project: my-gcp-project          # Your GCP project ID
 gar: my-artifact-registry        # GAR repository name
 region: us-central1              # GCP region
@@ -233,10 +268,8 @@ region: us-central1              # GCP region
 # ===== BUILD CONFIGURATION =====
 global_tag: latest               # Global tag (defaults to Git commit hash)
 max_processes: 4                 # Max parallel builds
-use_gar: false                   # Use GAR naming
-push_to_gar: false               # Push to GAR after building
 
-# ===== SMART FEATURES (v2.75) =====
+# ===== SMART FEATURES =====
 smart: false                     # Enable smart build orchestration
 git_track: false                 # Enable git change detection
 cache: false                     # Enable build caching
@@ -258,13 +291,13 @@ services: []
 | Field | Description | Default |
 |-------|-------------|---------|
 | `services_dir` | Directories to scan for services | Current directory (.) |
+| `registry_url` | OCI-compatible registry URL for any registry (GAR/ECR/ACR) | "" |
+| `push_to_registry` | Push built images to the configured registry | false |
 | `project` | GCP project ID for GAR | Required for GAR |
 | `gar` | GAR repository name | Required for GAR |
 | `region` | GCP region for GAR | Required for GAR |
 | `global_tag` | Global tag for all images | Git commit hash |
 | `max_processes` | Max parallel build processes | 4 |
-| `use_gar` | Use GAR naming convention | false |
-| `push_to_gar` | Push to GAR after building | false |
 | `smart` | Enable smart orchestration | false |
 | `git_track` | Enable git change detection | false |
 | `cache` | Enable build caching | false |
@@ -276,7 +309,7 @@ services: []
 ## Smart Features Deep Dive
 
 ### Automatic Service Discovery
-Dockerz v2.75 intelligently discovers services by:
+Dockerz v3.2.0 intelligently discovers services by:
 - Scanning for `Dockerfile` files recursively
 - Excluding build directories (`debian/`, `build/`, `dist/`)
 - Excluding dependency directories (`node_modules/`, `vendor/`, `__pycache__/`)
@@ -351,31 +384,30 @@ services/user-service
 backend/service1/frontend
 ```
 
-## Google Artifact Registry (GAR) Integration
+## Multi-Registry Support (v3.2.0)
 
-### Setup GAR Integration
+Dockerz v3.2.0 supports any OCI-compatible registry via a unified `--registry-url` flag. Auto-detects registry type from the URL pattern:
 
-1. **Configure GAR in build.yaml:**
-   ```yaml
-   use_gar: true
-   push_to_gar: true
-   project: my-gcp-project
-   gar: my-artifact-registry
-   region: us-central1
-   ```
+| Registry | Example URL | Auth |
+|----------|-------------|------|
+| **Google Artifact Registry** | `us-central1-docker.pkg.dev/my-project/my-repo` | `gcloud auth configure-docker` |
+| **AWS ECR** | `123456.dkr.ecr.us-east-1.amazonaws.com/my-repo` | `aws ecr get-login-password \| docker login` |
+| **Azure ACR** | `myregistry.azurecr.io/my-repo` | `az acr login --name myregistry` |
+| **Docker Hub** | `docker.io/myuser` | `docker login` |
+| **Self-hosted** | `registry.example.com/my-project` | `docker login` |
 
-2. **Authenticate with GAR:**
-   ```bash
-   gcloud auth configure-docker us-central1-docker.pkg.dev
-   ```
+### Setup
 
-### GAR Features
+```bash
+# GAR
+dockerz build --registry-url us-central1-docker.pkg.dev/my-project/my-repo --push-to-registry
 
-- **Automatic Naming**: `{region}-docker.pkg.dev/{project}/{gar}/{service}:{tag}`
-- **Custom Image Names**: Override with `image_name` in service config
-- **Push Integration**: Automatically push successful builds
-- **Error Handling**: Failed pushes logged separately
-- **Build Logging**: Comprehensive logs stored in `build.log`
+# AWS ECR
+dockerz build --registry-url 123456.dkr.ecr.us-east-1.amazonaws.com/my-repo --push-to-registry
+
+# Local-only (no registry)
+dockerz build
+```
 
 ## Architecture
 
@@ -390,6 +422,8 @@ internal/
 ├── config/        # Configuration management
 ├── discovery/     # Service discovery and scanning
 ├── git/          # Git change detection
+├── logging/      # Structured logging
+├── renderer/     # Terminal progress bar rendering
 └── smart/        # Smart orchestration logic
 ```
 
@@ -401,6 +435,8 @@ internal/
 - **internal/config/**: Configuration loading and validation
 - **internal/discovery/**: Service discovery and file scanning
 - **internal/git/**: Git tracking and diff analysis
+- **internal/logging/**: Comprehensive structured logging
+- **internal/renderer/**: Terminal progress bar rendering via mpb
 - **internal/smart/**: Intelligent build orchestration
 
 ## Troubleshooting
@@ -444,21 +480,6 @@ GOOS=darwin GOARCH=amd64 go build -o dockerz-darwin-amd64 ./cmd/dockerz
 GOOS=windows GOARCH=amd64 go build -o dockerz-windows-amd64.exe ./cmd/dockerz
 ```
 
-## Dockerz 3.0 Roadmap 🎯
-
-<!-- TODO: Implement unified CLI for services and directories -->
-- [ ] Add support for `dockerz build [path...] [--image-name NAME] [--tag TAG] ... [global-flags]` where:
-  - `path` can be:
-    - A **service directory** (e.g. `backend/`) → auto-detects `Dockerfile` and builds it
-    - A **parent directory** (e.g. `services/`) → recursively scans for all `Dockerfile`s
-    - Omitted → uses `services_dir` from `build.yaml`
-  - Per-service overrides (`--image-name`, `--tag`) apply to the **last service/directory before them**
-  - Repeated flags allowed for multiple overrides
-  - Deduplicate services to prevent double builds
-  - Preserve existing auto-discovery logic
-  - Update help text and examples
-  - add a --dry-run flag to simulate builds without executing them
-
 ---
 
-**Dockerz v3.0.0** - Making container build orchestration intelligent, fast, and developer-friendly.
+**Dockerz v3.2.0** - Making container build orchestration intelligent, fast, and developer-friendly.

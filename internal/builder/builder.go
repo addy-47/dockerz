@@ -1,12 +1,16 @@
 package builder
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/addy-47/dockerz/internal/config"
 )
 
 // GetGitCommitID fetches the short Git commit ID for default tagging
@@ -20,10 +24,61 @@ func GetGitCommitID() string {
 	return strings.TrimSpace(string(output))
 }
 
-// CheckGARAuth checks if GAR authentication is set up
-func CheckGARAuth() error {
-	cmd := exec.Command("gcloud", "auth", "print-access-token")
-	return cmd.Run()
+// CheckRegistryAuth verifies Docker can authenticate to the configured registry.
+// It checks that Docker is running and prints a registry-specific hint if auth fails.
+func CheckRegistryAuth(cfg *config.Config) error {
+	if cfg.RegistryURL == "" {
+		return nil // No registry configured, nothing to check
+	}
+
+	// Try docker info as a basic connectivity check
+	dockerCmd := exec.Command("docker", "info")
+	if err := dockerCmd.Run(); err != nil {
+		return fmt.Errorf("Docker daemon is not available: %w", err)
+	}
+
+	// Try docker manifest inspect to verify registry auth
+	// Use a non-existent tag to avoid pulling, we just care about auth status
+	testImage := cfg.RegistryURL + "/dockerz-auth-check:test"
+	testCmd := exec.Command("docker", "manifest", "inspect", testImage)
+	if err := testCmd.Run(); err != nil {
+		// Auth failed — show registry-specific hint based on URL pattern
+		hint := registryAuthHint(cfg.RegistryURL)
+		return fmt.Errorf("registry authentication failed. %s", hint)
+	}
+	return nil
+}
+
+// registryAuthHint returns a shell command hint for authenticating to a registry
+// based on the URL pattern.
+func registryAuthHint(registryURL string) string {
+	switch {
+	case strings.Contains(registryURL, "pkg.dev"):
+		// Google Artifact Registry
+		host := strings.SplitN(registryURL, "/", 2)[0]
+		return fmt.Sprintf("Run: gcloud auth configure-docker %s", host)
+	case strings.Contains(registryURL, "dkr.ecr"):
+		// AWS ECR
+		parts := strings.SplitN(registryURL, ".", 2)
+		region := ""
+		if len(parts) >= 2 {
+			subParts := strings.SplitN(parts[1], ".", 3)
+			if len(subParts) >= 2 {
+				region = subParts[0]
+			}
+		}
+		if region != "" {
+			return fmt.Sprintf("Run: aws ecr get-login-password --region %s | docker login --username AWS --password-stdin %s", region, strings.SplitN(registryURL, "/", 2)[0])
+		}
+		return fmt.Sprintf("Run: aws ecr get-login-password | docker login --username AWS --password-stdin %s", strings.SplitN(registryURL, "/", 2)[0])
+	case strings.Contains(registryURL, "azurecr.io"):
+		// Azure Container Registry
+		return fmt.Sprintf("Run: az acr login --name %s", strings.SplitN(registryURL, ".", 2)[0])
+	default:
+		// Generic Docker registry
+		host := strings.SplitN(registryURL, "/", 2)[0]
+		return fmt.Sprintf("Run: docker login %s", host)
+	}
 }
 
 // BuildDockerImage builds a single Docker image
@@ -43,16 +98,18 @@ func BuildDockerImage(task BuildTask) BuildResult {
 
 	// Construct full image name
 	var imageFullName string
-	if task.Config.UseGAR {
-		imageFullName = fmt.Sprintf("%s-docker.pkg.dev/%s/%s/%s:%s",
-			task.Config.Region, task.Config.Project, task.Config.GAR, task.ImageName, task.Tag)
+	if task.Config.RegistryURL != "" {
+		imageFullName = fmt.Sprintf("%s/%s:%s", task.Config.RegistryURL, task.ImageName, task.Tag)
 	} else {
 		imageFullName = fmt.Sprintf("%s:%s", task.ImageName, task.Tag)
 	}
 
 	result.Image = imageFullName
+	result.ImageName = task.ImageName
 
-	log.Printf("Building image for %s: %s", task.ServicePath, imageFullName)
+	if !task.Quiet {
+		log.Printf("Building image for %s: %s", task.ServicePath, imageFullName)
+	}
 
 	// Build the image
 	var buildCmd *exec.Cmd
@@ -63,13 +120,20 @@ func BuildDockerImage(task BuildTask) BuildResult {
 
 	if task.Config.EnableBuildKit && cacheType != "none" {
 		// Use BuildKit for better caching and performance
-		args := []string{"buildx", "build", "--load", "--progress=plain"}
+		progressFlag := "plain"
+		if task.Quiet {
+			progressFlag = "quiet"
+		}
+		args := []string{"buildx", "build", "--load", "--progress=" + progressFlag}
 
 		switch cacheType {
 		case "inline":
-			args = append(args,
-				"--cache-from=type=registry,ref="+imageFullName,
-				"--cache-to=type=inline")
+			// Inline cache is stored in the image itself.
+			// No --cache-from needed — Docker uses it automatically
+			// from the local layer cache on subsequent builds.
+			// Adding --cache-from=type=registry here would attempt
+			// a remote pull that fails when the image doesn't exist.
+			args = append(args, "--cache-to=type=inline")
 		case "registry":
 			args = append(args,
 				"--cache-from=type=registry,ref="+imageFullName,
@@ -79,32 +143,57 @@ func BuildDockerImage(task BuildTask) BuildResult {
 		args = append(args, "-t", imageFullName, ".")
 		buildCmd = exec.Command("docker", args...)
 		buildCmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1", "BUILDKIT_PROGRESS=plain")
-		log.Printf("Building %s with BuildKit (cache: %s)", imageFullName, cacheType)
+		if !task.Quiet {
+			log.Printf("Building %s with BuildKit (cache: %s)", imageFullName, cacheType)
+		}
 	} else {
 		// Use traditional docker build
 		buildCmd = exec.Command("docker", "build", "-t", imageFullName, ".")
-		log.Printf("Building %s with traditional docker build", imageFullName)
+		if !task.Quiet {
+			log.Printf("Building %s with traditional docker build", imageFullName)
+		}
 	}
-	
+
 	buildCmd.Dir = task.ServicePath
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
+
+	// Capture build output: tee to terminal AND buffer (for build.log on failure)
+	var buildBuf bytes.Buffer
+	if task.Quiet {
+		// During progress mode, suppress Docker output from terminal
+		// (still captured in buffer for build.log on failure)
+		buildCmd.Stdout = &buildBuf
+		buildCmd.Stderr = &buildBuf
+	} else {
+		buildCmd.Stdout = io.MultiWriter(os.Stdout, &buildBuf)
+		buildCmd.Stderr = io.MultiWriter(os.Stderr, &buildBuf)
+	}
 
 	if err := buildCmd.Run(); err != nil {
-		log.Printf("Failed to build %s", imageFullName)
+		if !task.Quiet {
+			log.Printf("Failed to build %s", imageFullName)
+		}
 		result.Status = "failed"
-		result.BuildOutput = err.Error()
+		// Capture actual Docker stderr/stdout output (not just Go exit error)
+		if buildBuf.Len() > 0 {
+			result.BuildOutput = strings.TrimSpace(buildBuf.String())
+		} else {
+			result.BuildOutput = err.Error()
+		}
 		result.EndTime = time.Now()
 		return result
 	}
 
-	log.Printf("Successfully built %s", imageFullName)
+	if !task.Quiet {
+		log.Printf("Successfully built %s", imageFullName)
+	}
 	result.Status = "success"
 	result.EndTime = time.Now()
 
-	// Push to GAR if enabled and build was successful
-	if task.Config.UseGAR && task.Config.PushToGAR && result.Status == "success" {
-		log.Printf("Queueing push to GAR: %s", imageFullName)
+	// Push to registry if enabled and build was successful
+	if task.Config.RegistryURL != "" && task.Config.PushToRegistry && result.Status == "success" {
+		if !task.Quiet {
+			log.Printf("Queueing push to registry: %s", imageFullName)
+		}
 		result.PushStatus = "queued"
 	}
 

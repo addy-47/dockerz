@@ -25,7 +25,7 @@ Compact reference for Go CLI tool that builds/pushes Docker images in parallel w
 - **No env var support** for config — use CLI flags or YAML only
 - **CLI flag prefix style**: kebab-case (`--git-track`, `--max-processes`)
 
-## Architecture (7 internal modules)
+## Architecture (8 internal modules)
 
 | Module | Path | Purpose |
 |--------|------|---------|
@@ -35,9 +35,8 @@ Compact reference for Go CLI tool that builds/pushes Docker images in parallel w
 | discovery | `internal/discovery/` | Service auto-discovery, input file parsing |
 | git | `internal/git/` | Change detection, diff analysis, caching |
 | logging | `internal/logging/` | Comprehensive structured logging |
+| renderer | `internal/renderer/` | Terminal progress bar rendering (mpb) |
 | smart | `internal/smart/` | Build orchestration decisions |
-
-Note: The README architecture section lists 6 modules and omits `logging`. There are actually 7 — `logging` exists and is used throughout.
 
 ## Key Commands
 
@@ -80,7 +79,7 @@ dockerz build --smart --git-track --cache --push-concurrency 4 --cache-type regi
 
 | Target | Command | Notes |
 |--------|---------|-------|
-| `build` | `go build -o dockerz -v ./cmd/dockerz` | Builds binary |
+| `build` | `go build -o dockerz ./cmd/dockerz` | Builds binary (silent) |
 | `test` | `go test -v ./...` | Recursive tests |
 | `all` | `test build` | Test then build (order matters) |
 | `clean` | go clean + remove binaries | |
@@ -93,7 +92,9 @@ dockerz build --smart --git-track --cache --push-concurrency 4 --cache-type regi
 ## Config File (`build.yaml`)
 
 - **services_dir**: can be `string` (comma-separated) or `[]string` in YAML — backward compatibility handled in code
-- **services**: explicit list with optional `image_name` and `tag` per service
+- **services**: explicit list with optional `image_name` and `tag` per service; `name` field doubles as service directory **path**
+- **registry_url**: OCI-compatible registry URL for any registry (GAR/ECR/ACR/generic); auto-detects type from URL pattern
+- **push_to_registry**: push built images to registry after successful build
 - **global_tag**: defaults to **git commit hash** if empty, not `latest`
 - **max_processes**: 0 = use 4 (fallback); docs claim CPU/2 but code defaults to 4
 - **Input/output changed services**: files must use `.txt` extension (validated in config)
@@ -131,12 +132,12 @@ Services are collected from **all sources** additively, then deduplicated:
 
 Discovery validation: each service must have an actual `Dockerfile` at its path — services without one are skipped with warnings.
 
-## GAR Integration
+## Registry Integration (v3.2.0)
 
-- **Auth required**: `gcloud auth configure-docker <region>-docker.pkg.dev`
-- **Image naming**: `{region}-docker.pkg.dev/{project}/{gar}/{service}:{tag}`
-- Uses `docker manifest inspect` to check image existence (fast, no pull)
-- GAR requires all three fields: `project`, `gar`, `region`
+- **Generic**: `--registry-url` accepts any OCI-compatible registry URL
+- **Auto-detection**: Registry type (GAR/ECR/ACR/generic) detected from URL pattern
+- **Auth**: Each registry requires its own auth (gcloud for GAR, aws for ECR, az for ACR, docker login for Docker Hub)
+- **GAR-specific**: Uses `docker manifest inspect` to check image existence (fast, no pull); requires all three fields: `project`, `gar`, `region`
 
 ## CI/CD
 
@@ -156,13 +157,14 @@ Discovery validation: each service must have an actual `Dockerfile` at its path 
 - Integration test project at `tests/test-project/` — contains 7 discoverable services (directories with Dockerfiles) plus 3 non-Dockerfile directories for edge cases
 - 50+ documented test scenarios in `tests/scenario.md` covering discovery, input files, smart features, caching, edge cases
 - Test scenarios include exact commands, expected outcomes, and setup steps with git commits
+- Quick progress-bar sandbox at `tests/sandbox/` — 3 services (api, worker, frontend) with 1-3s sleeps. Run from sandbox dir: `../../dockerz build --force`
 - To test: build binary, `cd tests/test-project`, run `dockerz build` with desired flags
 - Verify built images: `docker images | grep -E "(api|backend|frontend|shared)"`
 
 ## Known Quirks & Gotchas
 
 - **`logging` module exists** but is undocumented in README architecture section — it's used throughout the codebase
-- **`.gitignore` is very minimal** (only ignores `.agents/*` and itself) — does not follow standard Go patterns (`vendor/`, `*.exe`, etc.)
+- **`.gitignore` covers Go/std patterns** but has historically been described as minimal — verify it's up to date
 - **Cloud Build YAML exists** at `tests/cloudbuild-dockerz.yaml` — uses GKE deployment with SSH-based git auth and requires many substitutions
 - **`services_dir` has backward compatibility hacks** — supports both string and string array in YAML
 - **Banner is printed on root command** — `dockerz --help` shows banner before help text (via custom HelpFunc), but `dockerz --version` prints just the version string (version check happens before banner)
@@ -172,3 +174,4 @@ Discovery validation: each service must have an actual `Dockerfile` at its path 
 - **Phase 1 was done as a batch** (Go upgrade + 6 feature additions) instead of individual steps — retroactively added workflow rules here
 - **`config validate` reuses `config.LoadConfig`** and thus only catches errors that `LoadConfig` surfaces — it may miss structural YAML issues in unused fields
 - **`--cache-type` defaults to `"inline"`** in the builder (builder.go), but the config default is `""` (empty) — the CLI flag doesn't have a default string, and `cmd.Flags().Changed()` logic means an empty string from CLI gets passed through if flag is changed but empty. In practice, the builder handles the fallback.
+- **Progress renderer uses `Shutdown()` not `Wait()`** — mpb v8.12.1 auto-refresh mode never calls `b.cancel()` when bars complete via `SetTotal(-1, true)`. `bar.serve()` only exits on `b.ctx.Done()`, but `b.cancel()` is only called in manual-refresh mode. `Wait()` deadlocks (`bwg.Wait()` blocks before `Shutdown()`'s context cancel). The fix: call `Progress.Shutdown()` directly, which cancels the parent context and cascades to all bar child contexts, causing `serve()` to exit and `bwg.Done()` to fire.

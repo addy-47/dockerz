@@ -8,18 +8,20 @@ import (
 
 // BuildTask represents a single build task
 type BuildTask struct {
-	ServicePath string
-	ImageName   string
-	Tag         string
-	Config      *config.Config
-	CurrentHash string
+	ServicePath  string
+	ImageName    string
+	Tag          string
+	Config       *config.Config
+	CurrentHash  string
 	ChangedFiles []string
 	NeedsBuild   bool
+	Quiet        bool // Suppress verbose output (used with progress renderer)
 }
 
 // BuildResult represents the result of a build operation
 type BuildResult struct {
 	Service     string    `json:"service"`
+	ImageName   string    `json:"image_name,omitempty"` // Short name (e.g., "api")
 	Image       string    `json:"image"`
 	Status      string    `json:"status"`
 	BuildOutput string    `json:"build_output,omitempty"`

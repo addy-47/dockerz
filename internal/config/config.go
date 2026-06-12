@@ -28,8 +28,8 @@ func defaultThresholds() (cpu, mem, disk float64) {
 	// Check for WSL (Windows Subsystem for Linux) - moderate thresholds
 	if runtime.GOOS == "linux" {
 		if data, err := os.ReadFile("/proc/version"); err == nil {
-			if strings.Contains(strings.ToLower(string(data)), "microsoft") || 
-			   strings.Contains(strings.ToLower(string(data)), "wsl") {
+			if strings.Contains(strings.ToLower(string(data)), "microsoft") ||
+				strings.Contains(strings.ToLower(string(data)), "wsl") {
 				cpuDefault = 70.0
 				memDefault = 75.0
 				diskDefault = 80.0
@@ -56,9 +56,9 @@ func isRunningInContainer() bool {
 	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
 		cgroupContent := string(data)
 		if strings.Contains(cgroupContent, "docker") ||
-		   strings.Contains(cgroupContent, "kubepods") ||
-		   strings.Contains(cgroupContent, "containerd") ||
-		   strings.Contains(cgroupContent, "garden") {
+			strings.Contains(cgroupContent, "kubepods") ||
+			strings.Contains(cgroupContent, "containerd") ||
+			strings.Contains(cgroupContent, "garden") {
 			return true
 		}
 	}
@@ -139,7 +139,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	if config.MaxProcesses == 0 {
 		config.MaxProcesses = 4 // Default to 4 parallel processes
 	}
-	
+
 	// Set defaults for resource-aware scheduling (platform-aware)
 	cpuDef, memDef, diskDef := defaultThresholds()
 	if config.MaxCPUThreshold == 0 {
@@ -151,7 +151,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	if config.MaxDiskThreshold == 0 {
 		config.MaxDiskThreshold = diskDef
 	}
-	
+
 	// Set default for BuildKit (enabled by default for better performance)
 	if !config.EnableBuildKit {
 		config.EnableBuildKit = true
@@ -188,10 +188,24 @@ func LoadConfig(configPath string) (*Config, error) {
 		config.Smart = false
 	}
 
-	// Validate required fields for GAR if enabled
-	if config.UseGAR {
-		if config.Project == "" || config.GAR == "" || config.Region == "" {
-			return nil, fmt.Errorf("missing required fields for GAR: project, gar, region")
+	// Backward compatibility: auto-construct registry_url from GAR-specific fields
+	if config.RegistryURL == "" && config.UseGAR {
+		if config.Project != "" && config.Region != "" && config.GAR != "" {
+			config.RegistryURL = fmt.Sprintf("%s-docker.pkg.dev/%s/%s", config.Region, config.Project, config.GAR)
+		} else {
+			return nil, fmt.Errorf("use_gar is set but missing required GAR fields: project, gar, region")
+		}
+	}
+
+	// Map push_to_gar to push_to_registry for GAR users
+	if config.PushToGAR && !config.PushToRegistry {
+		config.PushToRegistry = true
+	}
+
+	// Validate registry_url if set (basic format check)
+	if config.RegistryURL != "" {
+		if strings.Contains(config.RegistryURL, " ") {
+			return nil, fmt.Errorf("registry_url must not contain spaces")
 		}
 	}
 
@@ -233,19 +247,24 @@ func SaveSampleConfig(filename string) error {
 # Note: Auto-discovery excludes common build/dependency directories like debian/, node_modules/, .git/, etc.
 services_dir:
 
-# ===== GOOGLE CLOUD CONFIGURATION =====
-# Configure your Google Cloud Platform settings for Artifact Registry
+# ===== REGISTRY CONFIGURATION =====
+# Configure your OCI-compatible container registry (optional)
+# Leave empty for local-only builds (image:tag naming)
+# Supports: GAR, AWS ECR, Docker Hub, Azure ACR, self-hosted, etc.
+# Override with --registry-url flag
+#
+# Examples:
+#   GAR:           us-central1-docker.pkg.dev/my-project/my-repo
+#   AWS ECR:       123456.dkr.ecr.us-east-1.amazonaws.com/my-repo
+#   Docker Hub:    docker.io/myuser
+#   Self-hosted:   registry.example.com/my-project
+registry_url:
 
-# Your GCP project ID (required when using Google Artifact Registry)
-# Override with --project flag
+# GAR-specific fields (alternative to registry_url for Google Artifact Registry)
+# If registry_url is empty and use_gar is true, these are combined into:
+#   <region>-docker.pkg.dev/<project>/<gar>
 project: my-gcp-project
-
-# Name of your Google Artifact Registry repository
-# Override with --gar flag
 gar: my-artifact-registry
-
-# GCP region where your Artifact Registry is located
-# Override with --region flag
 region: us-central1
 
 # ===== BUILD CONFIGURATION =====
@@ -268,16 +287,14 @@ push_concurrency: 2
 # Override with --cache-type flag
 cache_type: inline
 
-# Whether to use Google Artifact Registry for image naming and pushing
-# When true: images use GAR naming (region-docker.pkg.dev/project/gar/service:tag)
-# When false: images use local naming (service:tag)
-# Override with --use-gar flag
-use_gar: true
+# Whether to push built images to the configured registry after building
+# Only effective when registry_url is set
+# Override with --push-to-registry flag
+push_to_registry: true
 
-# Whether to push built images to Google Artifact Registry after building
-# Only effective when use_gar is true
-# Override with --push-to-gar flag
-push_to_gar: true
+# Alternative: use GAR-specific fields (use_gar + project/gar/region + push_to_gar)
+# use_gar: true
+# push_to_gar: true
 
 # ===== SMART BUILD FEATURES (v2.0) =====
 # Advanced features for optimizing CI/CD pipelines - disabled by default
@@ -359,7 +376,8 @@ services:
 #   dockerz build
 #
 # Build with custom settings:
-#   dockerz build --project my-prod-project --region us-east1 --tag v2.1.0
+#   dockerz build --registry-url us-east1-docker.pkg.dev/my-prod-project/my-repo --global-tag v2.1.0
+#   dockerz build --registry-url 123456.dkr.ecr.us-east-1.amazonaws.com/my-repo --push-to-registry
 #
 # Smart build with git tracking (CI/CD):
 #   dockerz build --smart --git-track --cache --output-changed-services changed.txt

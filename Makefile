@@ -17,7 +17,7 @@ BINARY_UNIX=$(BINARY_NAME)_unix
 all: test build
 
 build:
-	$(GOBUILD) -o $(BINARY_NAME) -v $(MAIN_PACKAGE)
+	$(GOBUILD) -o $(BINARY_NAME) $(MAIN_PACKAGE)
 
 test:
 	$(GOTEST) -v ./...
@@ -28,7 +28,7 @@ clean:
 	rm -f $(BINARY_UNIX)
 
 run:
-	$(GOBUILD) -o $(BINARY_NAME) -v $(MAIN_PACKAGE)
+	$(GOBUILD) -o $(BINARY_NAME) $(MAIN_PACKAGE)
 	./$(BINARY_NAME)
 
 deps:

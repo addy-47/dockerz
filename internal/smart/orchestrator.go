@@ -160,23 +160,22 @@ func (o *Orchestrator) analyzeService(cfg *config.Config, service discovery.Disc
 	if depth == 0 {
 		depth = 2 // Default depth
 	}
-	
+
 	if o.logger != nil {
 		o.logger.Debug(logging.CATEGORY_GIT, fmt.Sprintf("Checking git changes for %s (depth: %d)", service.Name, depth))
 	}
 
 	// 1. Check if image already exists in registry (Registry-First Strategy)
 	// Even if there are git changes, if the image for this tag already exists, we can skip.
-	if cfg.UseGAR {
-		var imageFullName string
-		imageFullName = fmt.Sprintf("%s-docker.pkg.dev/%s/%s/%s:%s",
-			cfg.Region, cfg.Project, cfg.GAR, service.ImageName, service.Tag)
+	if cfg.RegistryURL != "" {
+		imageFullName := fmt.Sprintf("%s/%s:%s",
+			cfg.RegistryURL, service.ImageName, service.Tag)
 
 		if o.logger != nil {
 			o.logger.Debug(logging.CATEGORY_SMART, fmt.Sprintf("Checking registry for %s", imageFullName))
 		}
 
-		if o.CheckGARImageExists(imageFullName) {
+		if o.CheckRegistryImageExists(imageFullName) {
 			if o.logger != nil {
 				o.logger.Info(logging.CATEGORY_SMART, fmt.Sprintf("%s: SKIP_BUILD - image already exists in registry: %s", service.Name, imageFullName))
 			}
@@ -231,7 +230,10 @@ func (o *Orchestrator) UpdateCache(serviceName, imageHash string) error {
 		TTL:         o.config.CacheTTL,
 	}
 
-	return o.cacheMgr.Set(entry)
+	if err := o.cacheMgr.Set(entry); err != nil {
+		return fmt.Errorf("UpdateCache: failed to set cache for %s: %w", serviceName, err)
+	}
+	return nil
 }
 
 // Cleanup performs cache cleanup
@@ -245,34 +247,30 @@ func (o *Orchestrator) GetStats(result *OrchestrationResult) string {
 		result.TotalServices, result.BuildCount, result.SkipCount)
 }
 
-// GAR Integration Framework (Phase 3 placeholders)
+// Registry Integration
 
-// CheckGARConnectivity checks if GAR registry is configured and reachable
-func (o *Orchestrator) CheckGARConnectivity(serviceName string) (configured, reachable bool) {
-	// TODO: Phase 3 - Implement actual GAR connectivity checks
-	// For now, return placeholders
-	log.Printf("GAR connectivity check for %s: placeholder implementation", serviceName)
+// CheckRegistryConnectivity checks if the registry is configured and reachable
+func (o *Orchestrator) CheckRegistryConnectivity(serviceName string) (configured, reachable bool) {
+	log.Printf("Registry connectivity check for %s: placeholder implementation", serviceName)
 	return false, false
 }
 
-// CheckGARImageExists checks if the service image exists in GAR using docker manifest inspect
-func (o *Orchestrator) CheckGARImageExists(imageFullName string) bool {
-	// Use 'docker manifest inspect' to check for image existence without pulling.
-	// This requires the registry to be authenticated (e.g. via gcloud auth configure-docker).
+// CheckRegistryImageExists checks if the service image exists in the registry using
+// docker manifest inspect. This requires the registry to be authenticated
+// (e.g. via gcloud auth configure-docker, docker login, etc.).
+func (o *Orchestrator) CheckRegistryImageExists(imageFullName string) bool {
 	cmd := exec.Command("docker", "manifest", "inspect", imageFullName)
-	
 	// We don't want to pollute stdout with manifest JSON, so we discard it.
-	// We only care about the exit code.
 	err := cmd.Run()
 	return err == nil
 }
 
-// UpdateGARState updates the service state with GAR information
-func (o *Orchestrator) UpdateGARState(cfg *config.Config, state *ServiceState, service discovery.DiscoveredService) {
-	state.GARConfigured, state.GARReachable = o.CheckGARConnectivity(service.Name)
-	if state.GARConfigured && state.GARReachable {
-		imageFullName := fmt.Sprintf("%s-docker.pkg.dev/%s/%s/%s:%s",
-			cfg.Region, cfg.Project, cfg.GAR, service.ImageName, service.Tag)
-		state.GARImageExists = o.CheckGARImageExists(imageFullName)
+// UpdateRegistryState updates the service state with registry information
+func (o *Orchestrator) UpdateRegistryState(cfg *config.Config, state *ServiceState, service discovery.DiscoveredService) {
+	state.GARConfigured, state.GARReachable = o.CheckRegistryConnectivity(service.Name)
+	if state.GARConfigured && state.GARReachable && cfg.RegistryURL != "" {
+		imageFullName := fmt.Sprintf("%s/%s:%s",
+			cfg.RegistryURL, service.ImageName, service.Tag)
+		state.GARImageExists = o.CheckRegistryImageExists(imageFullName)
 	}
 }

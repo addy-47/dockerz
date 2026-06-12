@@ -1,8 +1,40 @@
-.gpg*
-.agents*
-dockerz
-dockerz_*
+# Go
+vendor/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Build artifacts
+/dockerz
+/dockerz_*
 dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.gpg*
+.env
+.env.local
+
+# Project-specific
 build.log
 built-services.txt
 changed.txt
+*.log
+/__pycache__/
+*.pyc
+
+# Agents
+.agents*

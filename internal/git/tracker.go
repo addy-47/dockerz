@@ -27,7 +27,7 @@ func (t *Tracker) PreloadChanges(depth int) error {
 
 	gitRoot, err := t.getGitRoot()
 	if err != nil {
-		return err
+		return fmt.Errorf("PreloadChanges: failed to get git root: %w", err)
 	}
 
 	// 1. Preload uncommitted changes
@@ -265,7 +265,7 @@ func (t *Tracker) getUncommittedChanges(servicePath string) ([]string, error) {
 	cmd.Dir = gitRoot
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get git status: %w", err)
+		return nil, fmt.Errorf("failed to get git status for %s: %w", servicePath, err)
 	}
 
 	var changedFiles []string
@@ -340,7 +340,7 @@ func (t *Tracker) getCommitChanges(servicePath string, depth int) ([]string, err
 				return []string{}, nil
 			}
 		} else {
-			return nil, fmt.Errorf("failed to get git diff: %w", err)
+			return nil, fmt.Errorf("failed to get git diff for %s: %w", servicePath, err)
 		}
 	}
 

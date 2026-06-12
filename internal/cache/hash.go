@@ -15,7 +15,7 @@ func CalculateServiceHash(servicePath string) (string, error) {
 
 	err := filepath.Walk(servicePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return fmt.Errorf("error accessing %s: %w", path, err)
 		}
 
 		// Skip .git directory and other irrelevant files
@@ -33,12 +33,12 @@ func CalculateServiceHash(servicePath string) (string, error) {
 
 		file, err := os.Open(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to open %s for hashing: %w", path, err)
 		}
 		defer file.Close()
 
 		if _, err := io.Copy(hash, file); err != nil {
-			return err
+			return fmt.Errorf("failed to read %s for hash: %w", path, err)
 		}
 
 		return nil
