@@ -15,3 +15,20 @@ Description: Docker orchestration tool for smart, parallel builds
  multiple Docker images in parallel with intelligent change
  detection, multi-level caching, and smart build orchestration.
 
+Package: dockerz
+Version: 3.2.0
+Architecture: amd64
+Maintainer: Adhbhut Gupta <adhbutg@gmail.com>
+Filename: pool/main/dockerz/dockerz_3.2.0_amd64.deb
+Size: 4413484
+MD5sum: 8e0a3000a1b77976ab38fbca031d8a33
+SHA1: 23e62d9d6f9abf05d6f9341a42605f388288a18c
+SHA256: 4757417d29bfa91aab5a9bed3eea7a91590bf9de81b3ea315c24bb7fcdae505a
+Section: devel
+Priority: optional
+Homepage: https://github.com/addy-47/dockerz
+Description: Docker orchestration tool for smart, parallel builds
+ dockerz is a high-performance CLI tool for building and pushing
+ multiple Docker images in parallel with intelligent change
+ detection, multi-level caching, and smart build orchestration.
+
