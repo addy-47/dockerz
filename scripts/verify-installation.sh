@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Script to verify DevOps Toolkit installation
+# Script to verify Dockerz installation
 
 set -euo pipefail
 

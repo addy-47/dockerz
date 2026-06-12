@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Script to add the DevOps Toolkit APT repository
+# Script to add the Dockerz APT repository
 
 set -euo pipefail
 
 # Default values
 REPO_URL="https://addy-47.github.io/dockerz/"
-REPO_NAME="devops-toolkit"
+REPO_NAME="dockerz"
 REPO_LIST_FILE="/etc/apt/sources.list.d/${REPO_NAME}.list"
 PUBLIC_KEY_URL="${REPO_URL}public.gpg"
-KEYRING_PATH="/usr/share/keyrings/${REPO_NAME}.gpg"
+KEYRING_PATH="/usr/share/keyrings/${REPO_NAME}-archive-keyring.gpg"
 
 # Source common functions if available
 # SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,8 +61,8 @@ main() {
     rm -f /tmp/public.gpg
 
     # 2. Add sources list
-    # We use [trusted=yes] because the Release file is not signed yet.
-    # When signing is enabled, we should use [signed-by=$KEYRING_PATH]
+    # The Release file is signed with the GPG key at $KEYRING_PATH.
+    # Using signed-by ensures apt verifies the repo identity on every update.
     log "Creating source list at $REPO_LIST_FILE..."
     
     # Check architecture
@@ -71,10 +71,9 @@ main() {
         ARCH=$(dpkg --print-architecture)
     fi
     
-    # Construct the sources line
-    # Using trusted=yes as per requirement for unsigned repo
-    # We append 'apt/' because the repo root is at https://.../scripts/ but the APT structure starts at apt/
-    SOURCES_LINE="deb [arch=$ARCH trusted=yes] ${REPO_URL}apt/ stable main"
+    # Construct the sources line with GPG verification.
+    # We append 'apt/' because the repo root is at https://.../ but the APT structure starts at apt/
+    SOURCES_LINE="deb [arch=$ARCH signed-by=$KEYRING_PATH] ${REPO_URL}apt/ stable main"
     
     echo "$SOURCES_LINE" > "$REPO_LIST_FILE"
     

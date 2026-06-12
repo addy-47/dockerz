@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Uninstall script for DevOps Toolkit
+# Uninstall script for Dockerz
 
 set -euo pipefail
 

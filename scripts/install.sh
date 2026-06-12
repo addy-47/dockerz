@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DevOps Toolkit Installer
+# Dockerz APT Installer
 # Installs dockerz from the addy-47/dockerz APT repository.
 
 set -euo pipefail
@@ -132,8 +132,8 @@ if [[ "$REMOVE_MODE" == "true" ]]; then
     
     if [[ "$PURGE_REPO" == "true" ]]; then
         log "Removing APT repository..."
-        $SUDO rm -f /etc/apt/sources.list.d/devops-toolkit.list
-        $SUDO rm -f /usr/share/keyrings/devops-toolkit.gpg
+        $SUDO rm -f /etc/apt/sources.list.d/dockerz.list
+        $SUDO rm -f /usr/share/keyrings/dockerz-archive-keyring.gpg
         log "Repository removed."
     fi
     
