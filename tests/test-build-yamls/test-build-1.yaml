@@ -1,4 +1,4 @@
-# Dockerz v3.2.0 Configuration - Scenario 1: Pure Auto-Discovery
+# Dockerz v3.2.1 Configuration - Scenario 1: Pure Auto-Discovery
 # Empty services and empty services_dir for auto-discovery
 
 # ===== DIRECTORY CONFIGURATION =====

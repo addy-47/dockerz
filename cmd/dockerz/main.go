@@ -66,7 +66,7 @@ func PrintDockerzBanner() {
 	green.Println(` \__,_|\___/ \___|_|\_\___|_|  /___|  `)
 	fmt.Println()
 
-	white.Printf(" %s ", color.New(color.BgHiMagenta, color.FgHiWhite).Sprint(" v3.2.0 "))
+	white.Printf(" %s ", color.New(color.BgHiMagenta, color.FgHiWhite).Sprint(" v3.2.1 "))
 	yellow.Println(" The ultimate Docker companion for smart, parallel builds")
 	fmt.Println()
 }
@@ -74,7 +74,7 @@ func PrintDockerzBanner() {
 var rootCmd = &cobra.Command{
 	Use:   "dockerz",
 	Short: "🚀 Dockerz - Supercharge your Docker builds with smart orchestration",
-	Long: `Dockerz (v3.2.0) is a high-performance Docker orchestration tool designed for monorepos and complex CI/CD pipelines.
+	Long: `Dockerz (v3.2.1) is a high-performance Docker orchestration tool designed for monorepos and complex CI/CD pipelines.
 
 It intelligently analyzes your repository using Git tracking, skips unchanged services, 
 and leverages multi-level caching to reduce build times by up to 90%.
@@ -85,7 +85,7 @@ Quick Start:
   3. Build:       dockerz build --smart`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if version {
-			fmt.Println("dockerz version 3.2.0")
+			fmt.Println("dockerz version 3.2.1")
 			return
 		}
 		PrintDockerzBanner()
@@ -283,13 +283,15 @@ Examples:
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
 			logger.Error(logging.CATEGORY_CONFIG, fmt.Sprintf("Failed to load config: %v", err))
-			log.Fatalf("Failed to load config: %v", err)
+			fmt.Fprintf(os.Stderr, "Error: Failed to load config: %v\n", err)
+			os.Exit(1)
 		}
 
 		// Validate registry authentication if a registry is configured
 		if cfg.RegistryURL != "" {
 			if err := builder.CheckRegistryAuth(cfg); err != nil {
-				log.Fatalf("Registry authentication failed: %v", err)
+				fmt.Fprintf(os.Stderr, "Error: Registry authentication failed: %v\n", err)
+				os.Exit(1)
 			}
 		}
 
@@ -386,7 +388,8 @@ Examples:
 		discoveryResult, err := discovery.DiscoverServices(cfg, defaultTag, effectiveInputFile)
 		if err != nil {
 			logger.Error(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Failed to discover services: %v", err))
-			log.Fatalf("Failed to discover services: %v", err)
+			fmt.Fprintf(os.Stderr, "Error: Failed to discover services: %v\n", err)
+			os.Exit(1)
 		}
 
 		logger.Info(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Found %d services", len(discoveryResult.Services)))
@@ -439,7 +442,8 @@ Examples:
 			result, err := orchestrator.OrchestrateBuilds(cfg, discoveryResult.Services)
 			if err != nil {
 				logger.Error(logging.CATEGORY_SMART, fmt.Sprintf("Failed to orchestrate builds: %v", err))
-				log.Fatalf("Failed to orchestrate builds: %v", err)
+				fmt.Fprintf(os.Stderr, "Error: Failed to orchestrate builds: %v\n", err)
+				os.Exit(1)
 			}
 
 			logger.Info(logging.CATEGORY_SMART, orchestrator.GetStats(result))

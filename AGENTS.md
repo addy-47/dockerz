@@ -132,7 +132,7 @@ Services are collected from **all sources** additively, then deduplicated:
 
 Discovery validation: each service must have an actual `Dockerfile` at its path — services without one are skipped with warnings.
 
-## Registry Integration (v3.2.0)
+## Registry Integration (v3.2.1)
 
 - **Generic**: `--registry-url` accepts any OCI-compatible registry URL
 - **Auto-detection**: Registry type (GAR/ECR/ACR/generic) detected from URL pattern

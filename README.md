@@ -1,4 +1,4 @@
-# Dockerz v3.2.0 - The Ultimate Docker Companion Tool
+# Dockerz v3.2.1 - The Ultimate Docker Companion Tool
 
 ```
      _            _                    
@@ -38,7 +38,7 @@ Dockerz is a powerful CLI tool for building and pushing multiple Docker images i
 - **APT Repository**: Install via GPG-signed apt repo on GitHub Pages.
 - **CI/CD Integration**: Optimized for Cloud Build and GitHub Actions with minimal configuration.
 
-### 🆕 v3.2.0 New Features
+### 🆕 v3.2.1 New Features
 - **Progress Bar Terminal UI**: Live multi-progress bars using mpb — clean, no-borders, solid-fill style with per-service status icons (queued/building/done/failed) and elapsed time. Automatically falls back to traditional logging on non-TTY.
 - **Generic Multi-Registry Support**: Unified `--registry-url` and `--push-to-registry` for any OCI-compatible registry (GAR, AWS ECR, Azure ACR, Docker Hub, self-hosted). Auto-detects registry type from URL patterns.
 - **Build Log Stderr Capture**: `build.log` now captures both stdout and stderr from build commands via `io.MultiWriter` + `bytes.Buffer`.
@@ -243,7 +243,7 @@ dockerz init
 ### Example `build.yaml`
 
 ```yaml
-# Dockerz v3.2.0 Configuration
+# Dockerz v3.2.1 Configuration
 # This file configures how Dockerz builds and manages your microservices.
 
 # ===== DIRECTORY CONFIGURATION =====
@@ -309,7 +309,7 @@ services: []
 ## Smart Features Deep Dive
 
 ### Automatic Service Discovery
-Dockerz v3.2.0 intelligently discovers services by:
+Dockerz v3.2.1 intelligently discovers services by:
 - Scanning for `Dockerfile` files recursively
 - Excluding build directories (`debian/`, `build/`, `dist/`)
 - Excluding dependency directories (`node_modules/`, `vendor/`, `__pycache__/`)
@@ -384,9 +384,9 @@ services/user-service
 backend/service1/frontend
 ```
 
-## Multi-Registry Support (v3.2.0)
+## Multi-Registry Support (v3.2.1)
 
-Dockerz v3.2.0 supports any OCI-compatible registry via a unified `--registry-url` flag. Auto-detects registry type from the URL pattern:
+Dockerz v3.2.1 supports any OCI-compatible registry via a unified `--registry-url` flag. Auto-detects registry type from the URL pattern:
 
 | Registry | Example URL | Auth |
 |----------|-------------|------|
@@ -482,4 +482,4 @@ GOOS=windows GOARCH=amd64 go build -o dockerz-windows-amd64.exe ./cmd/dockerz
 
 ---
 
-**Dockerz v3.2.0** - Making container build orchestration intelligent, fast, and developer-friendly.
+**Dockerz v3.2.1** - Making container build orchestration intelligent, fast, and developer-friendly.
