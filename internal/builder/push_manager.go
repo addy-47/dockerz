@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -103,8 +102,6 @@ func (pm *PushManager) pushWithRetry(task PushTask) PushResult {
 	for attempt := 1; attempt <= pm.maxRetries; attempt++ {
 		if pm.logger != nil {
 			pm.logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Attempt %d/%d: Pushing image: %s", attempt, pm.maxRetries, task.ImageName))
-		} else {
-			log.Printf("Attempt %d/%d: Pushing image: %s", attempt, pm.maxRetries, task.ImageName)
 		}
 
 		pushCmd := exec.Command("docker", "push", task.ImageName)
@@ -127,8 +124,6 @@ func (pm *PushManager) pushWithRetry(task PushTask) PushResult {
 			if attempt < pm.maxRetries {
 				if pm.logger != nil {
 					pm.logger.Warn(logging.CATEGORY_BUILD, fmt.Sprintf("Push failed, retrying in %v: %v", pm.retryDelay, err))
-				} else {
-					log.Printf("Push failed, retrying in %v: %v", pm.retryDelay, err)
 				}
 				time.Sleep(pm.retryDelay)
 				continue
@@ -136,8 +131,6 @@ func (pm *PushManager) pushWithRetry(task PushTask) PushResult {
 
 			if pm.logger != nil {
 				pm.logger.Error(logging.CATEGORY_BUILD, fmt.Sprintf("Failed to push %s after %d attempts", task.ImageName, pm.maxRetries))
-			} else {
-				log.Printf("Failed to push %s after %d attempts", task.ImageName, pm.maxRetries)
 			}
 			return result
 		}
@@ -148,8 +141,6 @@ func (pm *PushManager) pushWithRetry(task PushTask) PushResult {
 
 		if pm.logger != nil {
 			pm.logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Successfully pushed %s (attempt %d)", task.ImageName, attempt))
-		} else {
-			log.Printf("Successfully pushed %s (attempt %d)", task.ImageName, attempt)
 		}
 		return result
 	}

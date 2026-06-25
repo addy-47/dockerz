@@ -1,24 +1,35 @@
 package builder
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/addy-47/dockerz/internal/config"
+	"github.com/addy-47/dockerz/internal/logging"
 )
+
+var logger *logging.Logger
+
+// SetLogger sets the package-level logger for the builder package
+func SetLogger(l *logging.Logger) {
+	logger = l
+}
 
 // GetGitCommitID fetches the short Git commit ID for default tagging
 func GetGitCommitID() string {
 	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
-		log.Printf("Failed to fetch Git commit ID. Ensure this is a Git repository.")
+		if logger != nil {
+			logger.Error(logging.CATEGORY_GIT, "Failed to fetch Git commit ID. Ensure this is a Git repository.")
+		}
 		return "unknown"
 	}
 	return strings.TrimSpace(string(output))
@@ -37,14 +48,21 @@ func CheckRegistryAuth(cfg *config.Config) error {
 		return fmt.Errorf("Docker daemon is not available: %w", err)
 	}
 
-	// Try docker manifest inspect to verify registry auth
-	// Use a non-existent tag to avoid pulling, we just care about auth status
+	// Try docker manifest inspect to verify registry auth.
+	// Use a non-existent tag to avoid pulling. A "no such manifest" error
+	// means auth is fine (image doesn't exist). Other errors mean auth failed.
 	testImage := cfg.RegistryURL + "/dockerz-auth-check:test"
 	testCmd := exec.Command("docker", "manifest", "inspect", testImage)
-	if err := testCmd.Run(); err != nil {
-		// Auth failed — show registry-specific hint based on URL pattern
+	output, err := testCmd.CombinedOutput()
+	if err != nil {
+		errMsg := strings.ToLower(string(output))
+		// "no such manifest" / "manifest unknown" = auth OK, image doesn't exist
+		if strings.Contains(errMsg, "no such manifest") || strings.Contains(errMsg, "manifest unknown") || strings.Contains(errMsg, "not found") {
+			return nil
+		}
+		// Real auth failure — show registry-specific hint
 		hint := registryAuthHint(cfg.RegistryURL)
-		return fmt.Errorf("registry authentication failed. %s", hint)
+		return fmt.Errorf("registry authentication failed: %s. %s", strings.TrimSpace(string(output)), hint)
 	}
 	return nil
 }
@@ -92,7 +110,9 @@ func BuildDockerImage(task BuildTask) BuildResult {
 	if !task.NeedsBuild {
 		result.Status = "skipped"
 		result.EndTime = time.Now()
-		log.Printf("Skipping build for %s (smart orchestration)", task.ServicePath)
+		if logger != nil {
+			logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Skipping build for %s (smart orchestration)", task.ServicePath))
+		}
 		return result
 	}
 
@@ -106,9 +126,11 @@ func BuildDockerImage(task BuildTask) BuildResult {
 
 	result.Image = imageFullName
 	result.ImageName = task.ImageName
+	result.ServiceName = task.ServiceName
+	// Use ServiceName for display identification (may differ from ImageName)
 
-	if !task.Quiet {
-		log.Printf("Building image for %s: %s", task.ServicePath, imageFullName)
+	if !task.Quiet && logger != nil {
+		logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Building image for %s: %s", task.ServicePath, imageFullName))
 	}
 
 	// Build the image
@@ -119,9 +141,12 @@ func BuildDockerImage(task BuildTask) BuildResult {
 	}
 
 	if task.Config.EnableBuildKit && cacheType != "none" {
-		// Use BuildKit for better caching and performance
+		// Use BuildKit for better caching and performance.
+		// When a progress callback is set (live display active), always use
+		// --progress=plain so we can capture real Docker step output.
+		// Fall back to --progress=quiet only when there's no display.
 		progressFlag := "plain"
-		if task.Quiet {
+		if task.Quiet && task.ProgressCb == nil {
 			progressFlag = "quiet"
 		}
 		args := []string{"buildx", "build", "--load", "--progress=" + progressFlag}
@@ -143,56 +168,113 @@ func BuildDockerImage(task BuildTask) BuildResult {
 		args = append(args, "-t", imageFullName, ".")
 		buildCmd = exec.Command("docker", args...)
 		buildCmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1", "BUILDKIT_PROGRESS=plain")
-		if !task.Quiet {
-			log.Printf("Building %s with BuildKit (cache: %s)", imageFullName, cacheType)
+		if !task.Quiet && logger != nil {
+			logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Building %s with BuildKit (cache: %s)", imageFullName, cacheType))
 		}
 	} else {
 		// Use traditional docker build
 		buildCmd = exec.Command("docker", "build", "-t", imageFullName, ".")
-		if !task.Quiet {
-			log.Printf("Building %s with traditional docker build", imageFullName)
+		if !task.Quiet && logger != nil {
+			logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Building %s with traditional docker build", imageFullName))
 		}
 	}
 
 	buildCmd.Dir = task.ServicePath
 
-	// Capture build output: tee to terminal AND buffer (for build.log on failure)
+	// Capture build output: buffer for build.log (on failure) and optionally
+	// feed Docker --progress=plain lines to the live display via ProgressCb.
+	// Three modes:
+	//   1. Quiet + ProgressCb → read piped output line-by-line, display Docker steps
+	//   2. Quiet alone          → capture to buffer only (legacy)
+	//   3. Not quiet            → tee to terminal AND buffer
 	var buildBuf bytes.Buffer
-	if task.Quiet {
-		// During progress mode, suppress Docker output from terminal
-		// (still captured in buffer for build.log on failure)
+	switch {
+	case task.Quiet && task.ProgressCb != nil:
+		// Live display mode: pipe stdout+stderr, read line-by-line.
+		stdout, _ := buildCmd.StdoutPipe()
+		stderr, _ := buildCmd.StderrPipe()
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		readPipe := func(rc io.ReadCloser) {
+			defer wg.Done()
+			scanner := bufio.NewScanner(rc)
+			scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+			for scanner.Scan() {
+				line := scanner.Text()
+				buildBuf.WriteString(line + "\n")
+				// Use ServiceName for display identification
+				task.ProgressCb(task.ServiceName, line)
+			}
+			rc.Close()
+		}
+
+		go readPipe(stdout)
+		go readPipe(stderr)
+
+		if err := buildCmd.Start(); err != nil {
+			result.Status = "failed"
+			result.BuildOutput = err.Error()
+			result.EndTime = time.Now()
+			return result
+		}
+		wg.Wait()
+		if err := buildCmd.Wait(); err != nil {
+			result.Status = "failed"
+			if buildBuf.Len() > 0 {
+				result.BuildOutput = strings.TrimSpace(buildBuf.String())
+			} else {
+				result.BuildOutput = err.Error()
+			}
+			result.EndTime = time.Now()
+			return result
+		}
+
+	case task.Quiet:
+		// Quiet mode without display — capture to buffer only.
 		buildCmd.Stdout = &buildBuf
 		buildCmd.Stderr = &buildBuf
-	} else {
+		if err := buildCmd.Run(); err != nil {
+			result.Status = "failed"
+			if buildBuf.Len() > 0 {
+				result.BuildOutput = strings.TrimSpace(buildBuf.String())
+			} else {
+				result.BuildOutput = err.Error()
+			}
+			result.EndTime = time.Now()
+			return result
+		}
+
+	default:
+		// Not quiet — tee to terminal and buffer.
 		buildCmd.Stdout = io.MultiWriter(os.Stdout, &buildBuf)
 		buildCmd.Stderr = io.MultiWriter(os.Stderr, &buildBuf)
+		if err := buildCmd.Run(); err != nil {
+			if logger != nil {
+				logger.Error(logging.CATEGORY_BUILD, fmt.Sprintf("Failed to build %s", imageFullName))
+			}
+			result.Status = "failed"
+			if buildBuf.Len() > 0 {
+				result.BuildOutput = strings.TrimSpace(buildBuf.String())
+			} else {
+				result.BuildOutput = err.Error()
+			}
+			result.EndTime = time.Now()
+			return result
+		}
+		if logger != nil {
+			logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Successfully built %s", imageFullName))
+		}
 	}
 
-	if err := buildCmd.Run(); err != nil {
-		if !task.Quiet {
-			log.Printf("Failed to build %s", imageFullName)
-		}
-		result.Status = "failed"
-		// Capture actual Docker stderr/stdout output (not just Go exit error)
-		if buildBuf.Len() > 0 {
-			result.BuildOutput = strings.TrimSpace(buildBuf.String())
-		} else {
-			result.BuildOutput = err.Error()
-		}
-		result.EndTime = time.Now()
-		return result
-	}
-
-	if !task.Quiet {
-		log.Printf("Successfully built %s", imageFullName)
-	}
 	result.Status = "success"
 	result.EndTime = time.Now()
 
 	// Push to registry if enabled and build was successful
 	if task.Config.RegistryURL != "" && task.Config.PushToRegistry && result.Status == "success" {
-		if !task.Quiet {
-			log.Printf("Queueing push to registry: %s", imageFullName)
+		if !task.Quiet && logger != nil {
+			logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Queueing push to registry: %s", imageFullName))
 		}
 		result.PushStatus = "queued"
 	}

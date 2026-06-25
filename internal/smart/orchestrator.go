@@ -2,7 +2,6 @@ package smart
 
 import (
 	"fmt"
-	"log"
 	"os/exec"
 	"time"
 
@@ -251,7 +250,9 @@ func (o *Orchestrator) GetStats(result *OrchestrationResult) string {
 
 // CheckRegistryConnectivity checks if the registry is configured and reachable
 func (o *Orchestrator) CheckRegistryConnectivity(serviceName string) (configured, reachable bool) {
-	log.Printf("Registry connectivity check for %s: placeholder implementation", serviceName)
+	if o.logger != nil {
+		o.logger.Info(logging.CATEGORY_SMART, fmt.Sprintf("Registry connectivity check for %s: placeholder implementation", serviceName))
+	}
 	return false, false
 }
 

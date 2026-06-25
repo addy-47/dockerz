@@ -2,19 +2,19 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/addy-47/dockerz/internal/builder"
 	"github.com/addy-47/dockerz/internal/cache"
 	"github.com/addy-47/dockerz/internal/config"
 	"github.com/addy-47/dockerz/internal/discovery"
+	"github.com/addy-47/dockerz/internal/display"
 	"github.com/addy-47/dockerz/internal/git"
 	"github.com/addy-47/dockerz/internal/logging"
-	"github.com/addy-47/dockerz/internal/renderer"
 	"github.com/addy-47/dockerz/internal/smart"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -66,7 +66,7 @@ func PrintDockerzBanner() {
 	green.Println(` \__,_|\___/ \___|_|\_\___|_|  /___|  `)
 	fmt.Println()
 
-	white.Printf(" %s ", color.New(color.BgHiMagenta, color.FgHiWhite).Sprint(" v3.2.1 "))
+	white.Printf(" %s ", color.New(color.BgHiMagenta, color.FgHiWhite).Sprint(" v3.2.2 "))
 	yellow.Println(" The ultimate Docker companion for smart, parallel builds")
 	fmt.Println()
 }
@@ -74,7 +74,7 @@ func PrintDockerzBanner() {
 var rootCmd = &cobra.Command{
 	Use:   "dockerz",
 	Short: "🚀 Dockerz - Supercharge your Docker builds with smart orchestration",
-	Long: `Dockerz (v3.2.1) is a high-performance Docker orchestration tool designed for monorepos and complex CI/CD pipelines.
+	Long: `Dockerz (v3.2.2) is a high-performance Docker orchestration tool designed for monorepos and complex CI/CD pipelines.
 
 It intelligently analyzes your repository using Git tracking, skips unchanged services, 
 and leverages multi-level caching to reduce build times by up to 90%.
@@ -85,7 +85,7 @@ Quick Start:
   3. Build:       dockerz build --smart`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if version {
-			fmt.Println("dockerz version 3.2.1")
+			fmt.Println("dockerz version 3.2.2")
 			return
 		}
 		PrintDockerzBanner()
@@ -103,7 +103,8 @@ var initCmd = &cobra.Command{
 				fmt.Printf("ℹ %v. Skipping initialization.\n", err)
 				return
 			}
-			log.Fatalf("Failed to create sample config: %v", err)
+			fmt.Fprintf(os.Stderr, "Failed to create sample config: %v\n", err)
+			os.Exit(1)
 		}
 		fmt.Println("✓ Created sample build.yaml")
 		fmt.Println("\nNext steps:")
@@ -254,38 +255,25 @@ Examples:
 		// Initialize comprehensive logging
 		logger, err := logging.NewLogger("build.log")
 		if err != nil {
-			log.Fatalf("Failed to initialize logging: %v", err)
+			fmt.Fprintf(os.Stderr, "Failed to initialize logging: %v\n", err)
+			os.Exit(1)
 		}
 		defer logger.Close()
 
-		// In TTY mode, mute console logging from the very start so the
-		// terminal stays clean for progress bars. All structured log
-		// messages still go to build.log, and standard log.Printf is
-		// discarded (restored when progress bars finish).
+		// Check if stderr is a TTY — determines whether we use live
+		// in-place status updates (cursor-up + carriage-return) or
+		// simple line-by-line output.
 		isTTY := term.IsTerminal(int(os.Stderr.Fd()))
-		progressRendererMode := isTTY && !dryRun
-		if progressRendererMode {
-			logger.MuteConsole()
-			log.SetOutput(io.Discard)
-		}
-
-		// Print startup banner with configuration (goes to build.log only in TTY mode)
-		logger.PrintBanner("DOCKERZ BUILD START", []string{
-			fmt.Sprintf("Config: %s", configPath),
-			fmt.Sprintf("Smart Features: %v", smartEnabled),
-			fmt.Sprintf("Git Tracking: %v", gitTrack),
-			fmt.Sprintf("Cache Enabled: %v", cacheEnabled),
-			fmt.Sprintf("Force Rebuild: %v", forceRebuild),
-		})
+		liveDisplay := isTTY && !dryRun
 
 		// Load configuration
-		logger.Info(logging.CATEGORY_CONFIG, fmt.Sprintf("Loading config from %s", configPath))
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
 			logger.Error(logging.CATEGORY_CONFIG, fmt.Sprintf("Failed to load config: %v", err))
 			fmt.Fprintf(os.Stderr, "Error: Failed to load config: %v\n", err)
 			os.Exit(1)
 		}
+		logger.Info(logging.CATEGORY_CONFIG, fmt.Sprintf("Loaded config from %s", configPath))
 
 		// Validate registry authentication if a registry is configured
 		if cfg.RegistryURL != "" {
@@ -378,13 +366,17 @@ Examples:
 		// Validate input file extension if provided (either from CLI flag or YAML config)
 		if effectiveInputFile != "" {
 			if err := config.ValidateTxtFile(effectiveInputFile); err != nil {
-				log.Fatalf("Invalid input changed services file: %v", err)
+				logger.Error(logging.CATEGORY_CONFIG, fmt.Sprintf("Invalid input changed services file: %v", err))
+				fmt.Fprintf(os.Stderr, "Invalid input changed services file: %v\n", err)
+				os.Exit(1)
 			}
 		}
 
+		// Set package-level loggers for discovery and builder packages
+		discovery.SetLogger(logger)
+		builder.SetLogger(logger)
+
 		// Discover services (unified discovery including input file)
-		logger.PrintSection("SERVICE DISCOVERY")
-		logger.Info(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Discovering services from input file: %s", effectiveInputFile))
 		discoveryResult, err := discovery.DiscoverServices(cfg, defaultTag, effectiveInputFile)
 		if err != nil {
 			logger.Error(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Failed to discover services: %v", err))
@@ -392,28 +384,18 @@ Examples:
 			os.Exit(1)
 		}
 
-		logger.Info(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Found %d services", len(discoveryResult.Services)))
-		if len(discoveryResult.Services) > 0 {
-			serviceList := make([]string, len(discoveryResult.Services))
-			for i, service := range discoveryResult.Services {
-				serviceList[i] = fmt.Sprintf("  %s (%s)", service.Name, service.Path)
-			}
-			logger.Info(logging.CATEGORY_DISCOVERY, "Services discovered:")
-			for _, service := range serviceList {
-				logger.Info(logging.CATEGORY_DISCOVERY, service)
-			}
-		}
-
 		// Validate output file extension if provided (either from CLI flag or YAML config)
 		if effectiveOutputFile != "" {
 			if err := config.ValidateTxtFile(effectiveOutputFile); err != nil {
-				log.Fatalf("Invalid output changed services file: %v", err)
+				logger.Error(logging.CATEGORY_CONFIG, fmt.Sprintf("Invalid output changed services file: %v", err))
+				fmt.Fprintf(os.Stderr, "Invalid output changed services file: %v\n", err)
+				os.Exit(1)
 			}
 		}
 
 		// Log any discovery errors
 		for _, discoveryErr := range discoveryResult.Errors {
-			log.Printf("Discovery error: %v", discoveryErr)
+			logger.Error(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Discovery error: %v", discoveryErr))
 		}
 
 		// Smart orchestration if enabled (disabled by default for basic builds)
@@ -421,11 +403,7 @@ Examples:
 		var changedFiles map[string][]string // Track changed files for output
 
 		if cfg.Smart {
-			logger.PrintSection("SMART ORCHESTRATION")
-			logger.Info(logging.CATEGORY_SMART, "Smart build orchestration enabled")
-			logger.Info(logging.CATEGORY_SMART, fmt.Sprintf("Git tracking: %v (depth: %d)", cfg.GitTrack, cfg.GitTrackDepth))
-			logger.Info(logging.CATEGORY_SMART, fmt.Sprintf("Cache enabled: %v", cfg.Cache))
-			logger.Info(logging.CATEGORY_SMART, fmt.Sprintf("Force rebuild: %v", cfg.Force))
+			logger.Debug(logging.CATEGORY_SMART, "Smart build orchestration enabled")
 
 			smartConfig := &smart.SmartConfig{
 				Enabled:       cfg.Smart,
@@ -446,18 +424,17 @@ Examples:
 				os.Exit(1)
 			}
 
-			logger.Info(logging.CATEGORY_SMART, orchestrator.GetStats(result))
+			logger.Debug(logging.CATEGORY_SMART, orchestrator.GetStats(result))
 
 			// Log detailed decisions for each service
-			logger.Info(logging.CATEGORY_SMART, "Service build decisions:")
 			for serviceName, decision := range result.Decisions {
 				switch decision {
 				case smart.ForceBuild:
-					logger.Info(logging.CATEGORY_SMART, fmt.Sprintf("  %s: FORCE_BUILD (configured)", serviceName))
+					logger.Debug(logging.CATEGORY_SMART, fmt.Sprintf("%s: FORCE_BUILD (configured)", serviceName))
 				case smart.ConditionalBuild:
-					logger.Info(logging.CATEGORY_SMART, fmt.Sprintf("  %s: BUILD (changes detected)", serviceName))
+					logger.Debug(logging.CATEGORY_SMART, fmt.Sprintf("%s: BUILD (changes detected)", serviceName))
 				case smart.SkipBuild:
-					logger.Info(logging.CATEGORY_SMART, fmt.Sprintf("  %s: SKIP (no changes)", serviceName))
+					logger.Debug(logging.CATEGORY_SMART, fmt.Sprintf("%s: SKIP (no changes)", serviceName))
 				}
 			}
 
@@ -475,13 +452,12 @@ Examples:
 				}
 			}
 		} else {
-			logger.PrintSection("GIT TRACKING (NON-SMART)")
 			// For non-smart builds, build all services but check for git changes if requested
 			servicesToBuild = discoveryResult.Services
 
 			// If git tracking is enabled but smart is disabled, check for changes
 			if cfg.GitTrack {
-				logger.Info(logging.CATEGORY_GIT, fmt.Sprintf("Git tracking enabled (depth: %d)", cfg.GitTrackDepth))
+				logger.Debug(logging.CATEGORY_GIT, fmt.Sprintf("Git tracking enabled (depth: %d)", cfg.GitTrackDepth))
 				changedFiles = make(map[string][]string)
 				gitTracker := git.NewTracker()
 				changesFound := false
@@ -493,14 +469,12 @@ Examples:
 					if files, err := gitTracker.GetChangedFiles(service.Path, depth); err == nil && len(files) > 0 {
 						changedFiles[service.Path] = files
 						changesFound = true
-						logger.Info(logging.CATEGORY_GIT, fmt.Sprintf("Changes found in %s: %d files", service.Name, len(files)))
+						logger.Debug(logging.CATEGORY_GIT, fmt.Sprintf("Changes found in %s: %d files", service.Name, len(files)))
 					}
 				}
 				if !changesFound {
-					logger.Info(logging.CATEGORY_GIT, "No git changes detected in any service")
+					logger.Debug(logging.CATEGORY_GIT, "No git changes detected in any service")
 				}
-			} else {
-				logger.Info(logging.CATEGORY_GIT, "Git tracking disabled, building all services")
 			}
 
 			// Mark all as needing build when smart features disabled
@@ -511,24 +485,17 @@ Examples:
 
 		// Root feature: Write changed services to file if requested (works with any command)
 		if effectiveOutputFile != "" {
-			logger.Info(logging.CATEGORY_CONFIG, fmt.Sprintf("Writing changed services to: %s", effectiveOutputFile))
 			var servicesForOutput []discovery.DiscoveredService
 
 			if cfg.Smart && len(servicesToBuild) < len(discoveryResult.Services) {
-				// Smart mode: write only the services that will be built
-				logger.Info(logging.CATEGORY_SMART, "Smart mode: writing services to be built")
 				servicesForOutput = servicesToBuild
 			} else if cfg.GitTrack && len(changedFiles) > 0 {
-				// Git track mode: write only services with changes
-				logger.Info(logging.CATEGORY_GIT, "Git tracking mode: writing services with changes")
 				for _, service := range servicesToBuild {
 					if _, hasChanges := changedFiles[service.Path]; hasChanges {
 						servicesForOutput = append(servicesForOutput, service)
 					}
 				}
 			} else {
-				// Default: write all services being built
-				logger.Info(logging.CATEGORY_CONFIG, "Default mode: writing all services to be built")
 				servicesForOutput = servicesToBuild
 			}
 
@@ -541,9 +508,7 @@ Examples:
 
 		// Dry-run: print what would be built and exit
 		if dryRun {
-			logger.PrintSection("DRY RUN")
-			logger.Info(logging.CATEGORY_BUILD, "Dry-run mode: no images will be built")
-			logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Services to build: %d of %d discovered", len(servicesToBuild), len(discoveryResult.Services)))
+			logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Dry-run: %d of %d services would be built", len(servicesToBuild), len(discoveryResult.Services)))
 			for _, service := range servicesToBuild {
 				logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("  Would build: %s (%s:%s)", service.Name, service.ImageName, service.Tag))
 			}
@@ -559,8 +524,13 @@ Examples:
 					logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("  Would skip:  %s (no changes detected)", service.Name))
 				}
 			}
-			logger.Info(logging.CATEGORY_BUILD, "Dry-run complete. Pass --dry-run=false to build.")
 			return
+		}
+
+		// Resolve max processes (CLI flag overrides config)
+		maxProcs := maxProcesses
+		if maxProcs == 0 {
+			maxProcs = cfg.MaxProcesses
 		}
 
 		// Create new discovery result with filtered services
@@ -570,80 +540,85 @@ Examples:
 		}
 
 		// Build images in parallel
-		logger.PrintSection("BUILD EXECUTION")
-		logger.Info(logging.CATEGORY_BUILD, fmt.Sprintf("Building %d services with max %d processes", len(servicesToBuild), maxProcesses))
 
-		maxProcs := maxProcesses
-		if maxProcs == 0 {
-			maxProcs = cfg.MaxProcesses
-		}
-
-		// Create progress renderer for live terminal output (skipped for non-TTY and dry-run)
-		var progressRenderer *renderer.ProgressRenderer
-		if progressRendererMode {
-			// Build a clean status header line with key flags
-			headerParts := []string{fmt.Sprintf("dockerz  %d services", len(servicesToBuild))}
-			if cfg.Force {
-				headerParts = append(headerParts, "force")
-			}
-			if cfg.Smart {
-				headerParts = append(headerParts, "smart")
-			}
-			if cfg.GitTrack {
-				headerParts = append(headerParts, "git-track")
-			}
-			if cfg.Cache {
-				headerParts = append(headerParts, "cache")
+		// Create live status display for terminal output (skipped for non-TTY and dry-run).
+		// Shows real Docker --progress=plain step lines per service.
+		var statusDisplay *display.Display
+		if liveDisplay {
+			// Build a clean status header with key config details
+			line1 := []string{fmt.Sprintf("Discovered %d services", len(servicesToBuild))}
+			if defaultTag != "" {
+				shortTag := defaultTag
+				if len(shortTag) > 8 {
+					shortTag = shortTag[:8]
+				}
+				line1 = append(line1, fmt.Sprintf("tag: %s", shortTag))
 			}
 			if cfg.RegistryURL != "" && cfg.PushToRegistry {
-				headerParts = append(headerParts, "push")
+				line1 = append(line1, "push")
 			}
-			headerParts = append(headerParts, fmt.Sprintf("max %d", maxProcs))
-			headerText := strings.Join(headerParts, "  |  ")
+			line1 = append(line1, fmt.Sprintf("max %d", maxProcs))
 
-			progressRenderer = renderer.NewProgressRenderer(logger)
-			// Extract service names for the progress renderer
+			line2 := []string{}
+			if cfg.Smart {
+				line2 = append(line2, "smart")
+			}
+			if cfg.GitTrack {
+				line2 = append(line2, "git-track")
+			}
+			if cfg.Force {
+				line2 = append(line2, "force")
+			}
+			if cfg.Cache {
+				line2 = append(line2, "cache")
+			}
+			if cfg.CacheType != "" && cfg.Cache {
+				line2 = append(line2, fmt.Sprintf("cache-type: %s", cfg.CacheType))
+			}
+
+			headerText := strings.Join(line1, "  |  ")
+			if len(line2) > 0 {
+				headerText += "\n  " + strings.Join(line2, "  |  ")
+			}
+
+			statusDisplay = display.New(os.Stderr, true)
 			serviceNames := make([]string, len(servicesToBuild))
 			for i, svc := range servicesToBuild {
 				serviceNames[i] = svc.Name
 			}
-			progressRenderer.Start(serviceNames, maxProcs, headerText)
+			statusDisplay.Start(serviceNames, maxProcs, headerText)
+
+			// Set up SIGINT handler for clean Ctrl+C exit.
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, syscall.SIGINT)
+			defer signal.Stop(sigChan)
+			go func() {
+				<-sigChan
+				statusDisplay.Stop()
+				os.Exit(130)
+			}()
 		}
 
 		startBuildTime := time.Now()
-		_, summary := builder.BuildImages(cfg, filteredResult, maxProcs, progressRenderer)
+		_, summary := builder.BuildImages(cfg, filteredResult, maxProcs, statusDisplay)
 		buildDuration := time.Since(startBuildTime)
 
-		// Stop the progress renderer (flushes bars, prints summary)
-		if progressRenderer != nil {
-			progressRenderer.Stop()
-			// Mute the logger for the remaining structured summary
-			// to avoid duplicating the visual summary on console.
-			// The structured summary still goes to build.log.
-			logger.MuteConsole()
-			defer logger.UnmuteConsole()
+		// Stop the live display and print the final summary to stderr.
+		if statusDisplay != nil {
+			statusDisplay.Stop()
 		}
 
-		// Log build summary with metrics
+		// Log build summary to build.log (and stdout in non-TTY mode).
 		logger.PrintSummary(map[string]interface{}{
-			"total_services":      len(discoveryResult.Services),
-			"services_built":      len(servicesToBuild),
-			"successful_builds":   summary.SuccessfulBuilds,
-			"failed_builds":       summary.FailedBuilds,
-			"skipped_builds":      len(discoveryResult.Services) - len(servicesToBuild),
+			"services_discovered": len(discoveryResult.Services),
+			"services_built":      summary.SuccessfulBuilds,
+			"services_failed":     summary.FailedBuilds,
 			"build_duration":      buildDuration,
-			"cache_effectiveness": fmt.Sprintf("%.1f%%", float64(summary.SuccessfulBuilds)/float64(len(servicesToBuild))*100),
 		})
-
-		// Log final performance metrics
-		logger.PrintMetrics("Total Build", buildDuration, summary.SuccessfulBuilds+summary.FailedBuilds)
 
 		// Exit with error code if there were build failures
 		if summary.FailedBuilds > 0 {
-			logger.Error(logging.CATEGORY_BUILD, fmt.Sprintf("Build completed with %d failures", summary.FailedBuilds))
 			os.Exit(1)
-		} else {
-			logger.Info(logging.CATEGORY_BUILD, "Build completed successfully")
 		}
 	},
 }

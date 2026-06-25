@@ -1,4 +1,4 @@
-# Dockerz v3.2.1 - The Ultimate Docker Companion Tool
+# Dockerz v3.2.2 - The Ultimate Docker Companion Tool
 
 ```
      _            _                    
@@ -38,8 +38,8 @@ Dockerz is a powerful CLI tool for building and pushing multiple Docker images i
 - **APT Repository**: Install via GPG-signed apt repo on GitHub Pages.
 - **CI/CD Integration**: Optimized for Cloud Build and GitHub Actions with minimal configuration.
 
-### 🆕 v3.2.1 New Features
-- **Progress Bar Terminal UI**: Live multi-progress bars using mpb — clean, no-borders, solid-fill style with per-service status icons (queued/building/done/failed) and elapsed time. Automatically falls back to traditional logging on non-TTY.
+### 🆕 v3.2.2 New Features
+- **Live Status Display**: Real-time service status updates with per-service Docker build step output. Shows latest `--progress=plain` lines for building services. Automatically falls back to traditional logging on non-TTY.
 - **Generic Multi-Registry Support**: Unified `--registry-url` and `--push-to-registry` for any OCI-compatible registry (GAR, AWS ECR, Azure ACR, Docker Hub, self-hosted). Auto-detects registry type from URL patterns.
 - **Build Log Stderr Capture**: `build.log` now captures both stdout and stderr from build commands via `io.MultiWriter` + `bytes.Buffer`.
 
@@ -49,9 +49,9 @@ Dockerz is built with a modular internal structure:
 - **Cache Module**: Manages multi-level caching (layer, hash, registry)
 - **Config Module**: Configuration management and validation
 - **Discovery Module**: Intelligent service discovery and scanning
+- **Display Module**: Live status display (TTY in-place or non-TTY line output)
 - **Git Module**: Git-based change detection and tracking
 - **Logging Module**: Comprehensive structured logging
-- **Renderer Module**: Terminal progress bar rendering (mpb-based)
 - **Smart Module**: Advanced orchestration and decision making
 
 ## Installation
@@ -243,7 +243,7 @@ dockerz init
 ### Example `build.yaml`
 
 ```yaml
-# Dockerz v3.2.1 Configuration
+# Dockerz v3.2.2 Configuration
 # This file configures how Dockerz builds and manages your microservices.
 
 # ===== DIRECTORY CONFIGURATION =====
@@ -309,7 +309,7 @@ services: []
 ## Smart Features Deep Dive
 
 ### Automatic Service Discovery
-Dockerz v3.2.1 intelligently discovers services by:
+Dockerz v3.2.2 intelligently discovers services by:
 - Scanning for `Dockerfile` files recursively
 - Excluding build directories (`debian/`, `build/`, `dist/`)
 - Excluding dependency directories (`node_modules/`, `vendor/`, `__pycache__/`)
@@ -384,9 +384,9 @@ services/user-service
 backend/service1/frontend
 ```
 
-## Multi-Registry Support (v3.2.1)
+## Multi-Registry Support (v3.2.2)
 
-Dockerz v3.2.1 supports any OCI-compatible registry via a unified `--registry-url` flag. Auto-detects registry type from the URL pattern:
+Dockerz v3.2.2 supports any OCI-compatible registry via a unified `--registry-url` flag. Auto-detects registry type from the URL pattern:
 
 | Registry | Example URL | Auth |
 |----------|-------------|------|
@@ -421,9 +421,9 @@ internal/
 ├── cache/         # Multi-level caching system
 ├── config/        # Configuration management
 ├── discovery/     # Service discovery and scanning
+├── display/       # Live status display (TTY/non-TTY)
 ├── git/          # Git change detection
 ├── logging/      # Structured logging
-├── renderer/     # Terminal progress bar rendering
 └── smart/        # Smart orchestration logic
 ```
 
@@ -436,7 +436,7 @@ internal/
 - **internal/discovery/**: Service discovery and file scanning
 - **internal/git/**: Git tracking and diff analysis
 - **internal/logging/**: Comprehensive structured logging
-- **internal/renderer/**: Terminal progress bar rendering via mpb
+- **internal/display/**: Live status display (TTY in-place or non-TTY line output)
 - **internal/smart/**: Intelligent build orchestration
 
 ## Troubleshooting
@@ -482,4 +482,4 @@ GOOS=windows GOARCH=amd64 go build -o dockerz-windows-amd64.exe ./cmd/dockerz
 
 ---
 
-**Dockerz v3.2.1** - Making container build orchestration intelligent, fast, and developer-friendly.
+**Dockerz v3.2.2** - Making container build orchestration intelligent, fast, and developer-friendly.

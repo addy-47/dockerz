@@ -690,6 +690,11 @@ Thumbs.db
 | — | `--dry-run` highest priority quick win | Most practical day-to-day benefit |
 | — | Unit tests before Phase 3 features | Don't add features without coverage |
 | — | Backward compatibility mandatory | Version 4.0 should not break 3.x configs |
+| — | Replace renderer with display package | Cleaner, terminal-agnostic, real Docker output |
+| — | Fix per-push completion timing | UX improvement: services transition to done immediately |
+| — | Remove log.SetOutput(io.Discard) | No longer needed, improves error visibility |
+| — | Wire ProgressCallback for real Docker output | Provides transparency into Docker build steps |
+| — | Keep old renderer package during transition | Ensures backward compatibility during rollout |
 
 ---
 
@@ -703,6 +708,9 @@ Thumbs.db
 - [ ] `.gitignore` updated
 - [ ] Help text and `README.md` current
 - [ ] No breaking changes to CLI flags or config format
+- [ ] Display package replaces renderer with terminal-agnostic live status
+- [ ] Per-push completion timing fixed for better UX
+- [ ] Real Docker build output visible in TTY mode
 
 ---
 

@@ -6,22 +6,29 @@ import (
 	"github.com/addy-47/dockerz/internal/config"
 )
 
+// ProgressCallback is called for each line of Docker build --progress=plain
+// output when a live status display is active.
+type ProgressCallback func(serviceName, line string)
+
 // BuildTask represents a single build task
 type BuildTask struct {
 	ServicePath  string
-	ImageName    string
+	ServiceName  string           // YAML name field (used for display identification)
+	ImageName    string           // Docker image name (may differ from ServiceName)
 	Tag          string
 	Config       *config.Config
 	CurrentHash  string
 	ChangedFiles []string
 	NeedsBuild   bool
-	Quiet        bool // Suppress verbose output (used with progress renderer)
+	Quiet        bool             // Suppress verbose output (used with progress display)
+	ProgressCb   ProgressCallback // called for each Docker output line (Quiet mode)
 }
 
 // BuildResult represents the result of a build operation
 type BuildResult struct {
 	Service     string    `json:"service"`
-	ImageName   string    `json:"image_name,omitempty"` // Short name (e.g., "api")
+	ServiceName string    `json:"service_name,omitempty"` // YAML name field (for display)
+	ImageName   string    `json:"image_name,omitempty"`   // Docker image name
 	Image       string    `json:"image"`
 	Status      string    `json:"status"`
 	BuildOutput string    `json:"build_output,omitempty"`

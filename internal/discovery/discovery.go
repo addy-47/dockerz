@@ -2,14 +2,21 @@ package discovery
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/addy-47/dockerz/internal/config"
+	"github.com/addy-47/dockerz/internal/logging"
 )
+
+var logger *logging.Logger
+
+// SetLogger sets the package-level logger for the discovery package
+func SetLogger(l *logging.Logger) {
+	logger = l
+}
 
 // NormalizeImageName converts service names to Docker-compatible kebab-case
 func NormalizeImageName(serviceName string) string {
@@ -226,12 +233,16 @@ func discoverFromInputFile(inputFilePath string, defaultTag string) ([]Discovere
 	var services []DiscoveredService
 	var errors []error
 
-	log.Printf("INFO: Reading input file: %s", inputFilePath)
+	if logger != nil {
+		logger.Debug(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Reading input file: %s", inputFilePath))
+	}
 
 	content, err := os.ReadFile(inputFilePath)
 	if err != nil {
 		errors = append(errors, fmt.Errorf("failed to read input file %s: %w", inputFilePath, err))
-		log.Printf("ERROR: Failed to read input file %s: %v", inputFilePath, err)
+		if logger != nil {
+			logger.Error(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Failed to read input file %s: %v", inputFilePath, err))
+		}
 		return services, errors
 	}
 
@@ -247,11 +258,15 @@ func discoverFromInputFile(inputFilePath string, defaultTag string) ([]Discovere
 	}
 
 	if nonEmptyLines == 0 {
-		log.Printf("WARNING: Input file '%s' is empty or contains no valid service paths", inputFilePath)
+		if logger != nil {
+			logger.Warn(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Input file '%s' is empty or contains no valid service paths", inputFilePath))
+		}
 		return services, errors
 	}
 
-	log.Printf("INFO: Found %d service entries in input file", nonEmptyLines)
+	if logger != nil {
+		logger.Debug(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Found %d service entries in input file", nonEmptyLines))
+	}
 
 	for _, line := range lines {
 		serviceName := strings.TrimSpace(line)
@@ -259,11 +274,15 @@ func discoverFromInputFile(inputFilePath string, defaultTag string) ([]Discovere
 			continue
 		}
 
-		log.Printf("INFO: Processing service from input file: %s", serviceName)
+		if logger != nil {
+			logger.Debug(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Processing service from input file: %s", serviceName))
+		}
 
 		// Validate that the service exists and has a Dockerfile
 		if err := ValidateDockerfile(serviceName); err != nil {
-			log.Printf("WARNING: Service '%s' from input file is invalid: %v", serviceName, err)
+			if logger != nil {
+				logger.Warn(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Service '%s' from input file is invalid: %v", serviceName, err))
+			}
 			errors = append(errors, fmt.Errorf("service %s from input file: %w", serviceName, err))
 			continue
 		}
@@ -271,7 +290,9 @@ func discoverFromInputFile(inputFilePath string, defaultTag string) ([]Discovere
 		// Create service entry
 		imageName := NormalizeImageName(filepath.Base(serviceName))
 		if err := ValidateImageName(imageName); err != nil {
-			log.Printf("WARNING: Service '%s' has invalid image name: %v", serviceName, err)
+			if logger != nil {
+				logger.Warn(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Service '%s' has invalid image name: %v", serviceName, err))
+			}
 			errors = append(errors, fmt.Errorf("service %s: %w", serviceName, err))
 			continue
 		}
@@ -283,13 +304,19 @@ func discoverFromInputFile(inputFilePath string, defaultTag string) ([]Discovere
 			Tag:       defaultTag,
 		}
 		services = append(services, discovered)
-		log.Printf("INFO: Successfully added service '%s' from input file", serviceName)
+		if logger != nil {
+			logger.Debug(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Successfully added service '%s' from input file", serviceName))
+		}
 	}
 
 	if len(services) == 0 {
-		log.Printf("WARNING: Input file '%s' contained %d entries but no valid services were found", inputFilePath, nonEmptyLines)
+		if logger != nil {
+			logger.Warn(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Input file '%s' contained %d entries but no valid services were found", inputFilePath, nonEmptyLines))
+		}
 	} else {
-		log.Printf("INFO: Successfully discovered %d services from input file", len(services))
+		if logger != nil {
+			logger.Debug(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Successfully discovered %d services from input file", len(services)))
+		}
 	}
 
 	return services, errors
@@ -338,12 +365,16 @@ func DiscoverServices(cfg *config.Config, defaultTag string, inputFilePath ...st
 		numSources++
 	}
 
-	log.Printf("DEBUG: Discovery sources - explicit_services: %v, services_dirs: %v (config: %v), input_file: %v, total_sources: %d",
-		hasExplicitServices, hasServicesDirectories, cfg.ServicesDir, hasInputFile, numSources)
+	if logger != nil {
+		logger.Debug(logging.CATEGORY_DISCOVERY, fmt.Sprintf("Discovery sources - explicit_services: %v, services_dirs: %v, input_file: %v, total_sources: %d",
+			hasExplicitServices, hasServicesDirectories, hasInputFile, numSources))
+	}
 
 	// UNIFIED DISCOVERY: Use when multiple sources are provided
 	if numSources > 1 {
-		log.Printf("DEBUG: Using UNIFIED discovery (multiple sources)")
+		if logger != nil {
+			logger.Debug(logging.CATEGORY_DISCOVERY, "Using unified discovery (multiple sources)")
+		}
 		// 1. Collect explicit services from YAML (if any)
 		if hasExplicitServices {
 			services, errors := discoverExplicitServices(cfg, defaultTag)
@@ -375,37 +406,33 @@ func DiscoverServices(cfg *config.Config, defaultTag string, inputFilePath ...st
 		// Remove duplicates to prevent double builds
 		allServices = deduplicateServices(allServices)
 	} else {
-		log.Printf("DEBUG: Using SINGLE SOURCE discovery")
+		if logger != nil {
+			logger.Debug(logging.CATEGORY_DISCOVERY, "Using single source discovery")
+		}
 		// SINGLE SOURCE DISCOVERY: Use only the provided source
 
 		if hasExplicitServices {
 			// Use explicit services only
-			log.Printf("DEBUG: Using explicit services from YAML")
 			services, errors := discoverExplicitServices(cfg, defaultTag)
 			allServices = append(allServices, services...)
 			allErrors = append(allErrors, errors...)
 		} else if hasServicesDirectories {
 			// Use services directories only
-			log.Printf("DEBUG: Using services directories")
 			services, errors := discoverFromDirectories(cfg.ServicesDir, defaultTag)
 			allServices = append(allServices, services...)
 			allErrors = append(allErrors, errors...)
 		} else if hasInputFile {
-			// Use input file only - with enhanced logging for edge cases
-			log.Printf("DEBUG: Using input file only")
+			// Use input file only
 			services, errors := discoverFromInputFile(inputFilePath[0], defaultTag)
 			allServices = append(allServices, services...)
 			allErrors = append(allErrors, errors...)
 		} else {
 			// No sources configured - fall back to auto-discovery
-			log.Printf("DEBUG: No sources configured, falling back to auto-discovery")
 			services, errors := autoDiscoverServices(defaultTag)
 			allServices = append(allServices, services...)
 			allErrors = append(allErrors, errors...)
 		}
 	}
-
-	log.Printf("DEBUG: Final service count: %d", len(allServices))
 
 	result := &DiscoveryResult{
 		Services: allServices,

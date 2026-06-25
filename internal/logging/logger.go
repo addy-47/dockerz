@@ -34,7 +34,12 @@ const (
 	CATEGORY_PERFORMANCE Category = "PERFORMANCE"
 )
 
-// Logger provides unified logging for both CLI and file output
+// Logger provides unified logging for both CLI and file output.
+//
+// Console output uses Docker Compose style: clean messages with ✔ / ⚠ / ✗
+// prefixes. No timestamps, no log levels cluttering the terminal.
+//
+// File output retains full structured format: [HH:MM:SS] LEVEL: CATEGORY: message
 type Logger struct {
 	consoleLogger *log.Logger
 	fileLogger    *log.Logger
@@ -100,11 +105,23 @@ func (l *Logger) SetMinLevel(level Level) {
 	l.minLevel = level
 }
 
-// formatMessage formats a log message with timestamp and category
-func (l *Logger) formatMessage(level Level, category Category, message string) string {
+// formatFileMessage formats a log message for file output: [HH:MM:SS] LEVEL: CATEGORY: message
+func (l *Logger) formatFileMessage(level Level, category Category, message string) string {
 	timestamp := time.Now().Format("15:04:05")
 	levelStr := l.levelToString(level)
-	return fmt.Sprintf("[%s] %s: %s", timestamp, levelStr, message)
+	return fmt.Sprintf("[%s] %s: %s: %s", timestamp, levelStr, string(category), message)
+}
+
+// formatConsoleMessage formats a log message for console output: ✔ message (clean, no prefix noise)
+func (l *Logger) formatConsoleMessage(level Level, category Category, message string) string {
+	switch level {
+	case WARN:
+		return fmt.Sprintf(" ⚠  %s", message)
+	case ERROR:
+		return fmt.Sprintf(" ✗  %s", message)
+	default:
+		return message
+	}
 }
 
 // levelToString converts level to string
@@ -130,48 +147,41 @@ func (l *Logger) shouldLog(level Level, category Category) bool {
 	return l.enabled[category] && level >= l.minLevel
 }
 
+// log writes to both console and file with appropriate formatting
+func (l *Logger) log(level Level, category Category, message string) {
+	if !l.shouldLog(level, category) {
+		return
+	}
+
+	// Console: clean Docker Compose style
+	consoleMsg := l.formatConsoleMessage(level, category, message)
+	l.consoleLogger.Println(consoleMsg)
+
+	// File: full structured format
+	if l.fileLogger != nil {
+		fileMsg := l.formatFileMessage(level, category, message)
+		l.fileLogger.Println(fileMsg)
+	}
+}
+
 // Debug logs a debug message
 func (l *Logger) Debug(category Category, message string) {
-	if l.shouldLog(DEBUG, category) {
-		formatted := l.formatMessage(DEBUG, category, message)
-		l.consoleLogger.Println(formatted)
-		if l.fileLogger != nil {
-			l.fileLogger.Println(formatted)
-		}
-	}
+	l.log(DEBUG, category, message)
 }
 
 // Info logs an info message
 func (l *Logger) Info(category Category, message string) {
-	if l.shouldLog(INFO, category) {
-		formatted := l.formatMessage(INFO, category, message)
-		l.consoleLogger.Println(formatted)
-		if l.fileLogger != nil {
-			l.fileLogger.Println(formatted)
-		}
-	}
+	l.log(INFO, category, message)
 }
 
 // Warn logs a warning message
 func (l *Logger) Warn(category Category, message string) {
-	if l.shouldLog(WARN, category) {
-		formatted := l.formatMessage(WARN, category, message)
-		l.consoleLogger.Println(formatted)
-		if l.fileLogger != nil {
-			l.fileLogger.Println(formatted)
-		}
-	}
+	l.log(WARN, category, message)
 }
 
 // Error logs an error message
 func (l *Logger) Error(category Category, message string) {
-	if l.shouldLog(ERROR, category) {
-		formatted := l.formatMessage(ERROR, category, message)
-		l.consoleLogger.Println(formatted)
-		if l.fileLogger != nil {
-			l.fileLogger.Println(formatted)
-		}
-	}
+	l.log(ERROR, category, message)
 }
 
 // PrintBanner prints a formatted banner message

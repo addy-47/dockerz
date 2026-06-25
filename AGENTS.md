@@ -33,9 +33,9 @@ Compact reference for Go CLI tool that builds/pushes Docker images in parallel w
 | cache | `internal/cache/` | Layer, hash, registry, and distributed caching |
 | config | `internal/config/` | YAML loading, validation, sample generation |
 | discovery | `internal/discovery/` | Service auto-discovery, input file parsing |
+| display | `internal/display/` | Live status display (TTY in-place or non-TTY line output) |
 | git | `internal/git/` | Change detection, diff analysis, caching |
-| logging | `internal/logging/` | Comprehensive structured logging |
-| renderer | `internal/renderer/` | Terminal progress bar rendering (mpb) |
+| logging | `internal/logging/` | Docker Compose-style console output + structured file logging |
 | smart | `internal/smart/` | Build orchestration decisions |
 
 ## Key Commands
@@ -132,7 +132,7 @@ Services are collected from **all sources** additively, then deduplicated:
 
 Discovery validation: each service must have an actual `Dockerfile` at its path — services without one are skipped with warnings.
 
-## Registry Integration (v3.2.1)
+## Registry Integration (v3.2.2)
 
 - **Generic**: `--registry-url` accepts any OCI-compatible registry URL
 - **Auto-detection**: Registry type (GAR/ECR/ACR/generic) detected from URL pattern
@@ -157,12 +157,13 @@ Discovery validation: each service must have an actual `Dockerfile` at its path 
 - Integration test project at `tests/test-project/` — contains 7 discoverable services (directories with Dockerfiles) plus 3 non-Dockerfile directories for edge cases
 - 50+ documented test scenarios in `tests/scenario.md` covering discovery, input files, smart features, caching, edge cases
 - Test scenarios include exact commands, expected outcomes, and setup steps with git commits
-- Quick progress-bar sandbox at `tests/sandbox/` — 3 services (api, worker, frontend) with 1-3s sleeps. Run from sandbox dir: `../../dockerz build --force`
+- Quick sandbox at `tests/sandbox/` — 3 services (api, worker, frontend) with 1-3s sleeps. Run from sandbox dir: `../../dockerz build --force`
 - To test: build binary, `cd tests/test-project`, run `dockerz build` with desired flags
 - Verify built images: `docker images | grep -E "(api|backend|frontend|shared)"`
 
 ## Known Quirks & Gotchas
 
+- **Console logging uses Docker Compose style** — no timestamps or `[INFO]` prefixes on console; just clean messages with ` ✔ ` / ` ⚠ ` / ` ✗ ` for warnings/errors. File logger (`build.log`) retains full `[HH:MM:SS] LEVEL: CATEGORY: message` format. Debug-level messages (`logger.Debug`) only go to file, not console.
 - **`logging` module exists** but is undocumented in README architecture section — it's used throughout the codebase
 - **`.gitignore` covers Go/std patterns** but has historically been described as minimal — verify it's up to date
 - **Cloud Build YAML exists** at `tests/cloudbuild-dockerz.yaml` — uses GKE deployment with SSH-based git auth and requires many substitutions
@@ -175,4 +176,4 @@ Discovery validation: each service must have an actual `Dockerfile` at its path 
 - **`config validate` reuses `config.LoadConfig`** and thus only catches errors that `LoadConfig` surfaces — it may miss structural YAML issues in unused fields
 - **`--cache-type` defaults to `"inline"`** in the builder (builder.go), but the config default is `""` (empty) — the CLI flag doesn't have a default string, and `cmd.Flags().Changed()` logic means an empty string from CLI gets passed through if flag is changed but empty. In practice, the builder handles the fallback.
 - **Progress renderer uses `Shutdown()` not `Wait()`** — mpb v8.12.1 auto-refresh mode never calls `b.cancel()` when bars complete via `SetTotal(-1, true)`. `bar.serve()` only exits on `b.ctx.Done()`, but `b.cancel()` is only called in manual-refresh mode. `Wait()` deadlocks (`bwg.Wait()` blocks before `Shutdown()`'s context cancel). The fix: call `Progress.Shutdown()` directly, which cancels the parent context and cascades to all bar child contexts, causing `serve()` to exit and `bwg.Done()` to fire.
-- **Fatal errors before progress renderer start are silently swallowed in TTY mode** — `log.SetOutput(io.Discard)` is called early in the build command to keep the terminal clean for progress bars. Any `log.Fatalf` call before the progress renderer starts (e.g., `CheckRegistryAuth` failure) writes to `io.Discard`. Fixed in v3.2.1: all early fatal errors now use `fmt.Fprintf(os.Stderr, ...); os.Exit(1)` instead of `log.Fatalf`.
+- **Fatal errors before progress renderer start are silently swallowed in TTY mode** — `log.SetOutput(io.Discard)` is called early in the build command to keep the terminal clean for progress bars. Any `log.Fatalf` call before the progress renderer starts (e.g., `CheckRegistryAuth` failure) writes to `io.Discard`. Fixed in v3.2.2: all early fatal errors now use `fmt.Fprintf(os.Stderr, ...); os.Exit(1)` instead of `log.Fatalf`.

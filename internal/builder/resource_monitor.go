@@ -2,11 +2,11 @@ package builder
 
 import (
 	"fmt"
-	"log"
 	"runtime"
 	"sync"
 	"time"
 
+	"github.com/addy-47/dockerz/internal/logging"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -86,21 +86,27 @@ func (rm *ResourceMonitor) updateResourceMetrics() {
 	// Get CPU usage
 	cpuPercent, err := cpu.Percent(0, false)
 	if err != nil {
-		log.Printf("Warning: Failed to get CPU usage: %v", err)
+		if logger != nil {
+			logger.Warn(logging.CATEGORY_PERFORMANCE, fmt.Sprintf("Failed to get CPU usage: %v", err))
+		}
 		cpuPercent = []float64{0}
 	}
 
 	// Get memory usage
 	memInfo, err := mem.VirtualMemory()
 	if err != nil {
-		log.Printf("Warning: Failed to get memory usage: %v", err)
+		if logger != nil {
+			logger.Warn(logging.CATEGORY_PERFORMANCE, fmt.Sprintf("Failed to get memory usage: %v", err))
+		}
 		memInfo = &mem.VirtualMemoryStat{UsedPercent: 0}
 	}
 
 	// Get disk usage
 	diskInfo, err := disk.Usage("/")
 	if err != nil {
-		log.Printf("Warning: Failed to get disk usage: %v", err)
+		if logger != nil {
+			logger.Warn(logging.CATEGORY_PERFORMANCE, fmt.Sprintf("Failed to get disk usage: %v", err))
+		}
 		diskInfo = &disk.UsageStat{UsedPercent: 0}
 	}
 
@@ -113,8 +119,10 @@ func (rm *ResourceMonitor) updateResourceMetrics() {
 	rm.currentMemory = memInfo.UsedPercent
 	rm.currentDisk = diskInfo.UsedPercent
 
-	log.Printf("Resource Monitor: CPU=%.1f%%, Memory=%.1f%%, Disk=%.1f%%",
-		rm.currentLoad, rm.currentMemory, rm.currentDisk)
+	if logger != nil {
+		logger.Info(logging.CATEGORY_PERFORMANCE, fmt.Sprintf("Resource Monitor: CPU=%.1f%%, Memory=%.1f%%, Disk=%.1f%%",
+			rm.currentLoad, rm.currentMemory, rm.currentDisk))
+	}
 }
 
 // CanSchedule returns true if resources are available for another build
